@@ -5,6 +5,7 @@
 - A new README: DaoHarness Skeleton, a recorded run, how it works, Skeleton and hosted, FAQ.
 - Issue forms, a pull request template and AGENTS.md.
 - Model replies with `<think>` blocks, code fences, trailing commas or capitalised step ids are tidied and recorded.
+- Decisions: a choice in another case or a confidence like `"92%"` is read; an unreadable answer goes to a person alone.
 
 ## 0.1.0 · 2026-10-22
 

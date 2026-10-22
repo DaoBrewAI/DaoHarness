@@ -2,12 +2,15 @@
 threshold goes to a person. The decider is your model, or a DecisionPort you plug in instead of it.
 
 Every answer is kept as a record (who answered, the choice, the confidence, accepted or not), so a person who
-reviews an item sees what the decider said.
+reviews an item sees what the decider said. The model's answer is read generously where that is safe (a choice in
+another case, a confidence written as "92%") and the record says so; an item it cannot read goes to a person alone.
 """
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field, replace
+from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
 from jsonschema import Draft202012Validator
@@ -24,6 +27,7 @@ NONE_OPTION = "none_apply"
 DEFAULT_THRESHOLD = 0.75   # a step may set its own (config "decision_threshold")
 MAX_CONTEXT = 24000
 DECISION_SKILL_ID = "workflow-decision"
+UNSIGNED_NUMBER = re.compile(r"\d+\.?\d*|\.\d+")   # used with fullmatch: no sign, no exponent, no separators
 KINDS = frozenset({"choice", "yes_no"})
 INSTRUCTIONS = (
     "Answer every item with one of its options, judging only from that item's context. Say how sure you are, from "
@@ -68,6 +72,8 @@ class DecisionAnswer:
     rationale: str = ""
     provider: str = ""
     model: str | None = None
+    notes: tuple[str, ...] = ()   # what was changed to read the answer; kept on its record
+    error: str | None = None      # why the item has no usable answer: it then goes to a person
 
 
 class DecisionUnavailable(RuntimeError):
@@ -104,7 +110,8 @@ def _closed(props: dict) -> dict:
 
 
 class ModelDecisions:
-    """The model answers all open items of a step in one call (operation "decide"), each from a fixed list."""
+    """The model answers all open items of a step in one call (operation "decide"), each from a fixed list. Every
+    item is read on its own: one the model got wrong goes to a person and the others keep their answers."""
 
     def __init__(self, model: ModelPort) -> None:
         self.model = model
@@ -139,13 +146,73 @@ class ModelDecisions:
         content, receipt = self.model.generate(
             org_id=org_id, operation="decide", skill_id=DECISION_SKILL_ID,
             input_data=self.payload_for(items, rubric), instructions=INSTRUCTIONS, evidence=[], schema=schema)
-        if not isinstance(content, Mapping) or next(Draft202012Validator(schema).iter_errors(dict(content)), None):
+        if not isinstance(content, Mapping) or set(content) - {i.id for i in items}:
             raise ModelError("invalid_decision_output")
-        answers = [DecisionAnswer(id=i.id, choice=content[i.id]["choice"], confidence=content[i.id]["confidence"],
-                                  evidence=tuple(content[i.id]["evidence_quotes"]),
-                                  rationale=content[i.id]["rationale"], provider="model", model=receipt.model)
+        reply_notes = tuple(f"reply tidied: {repair}" for repair in getattr(receipt, "repairs", None) or ())
+        answers = [_read_answer(i, content.get(i.id), schema["properties"][i.id], reply_notes, receipt.model)
                    for i in items]
         return answers, receipt
+
+
+def _read_answer(item: DecisionItem, raw: Any, schema: Mapping, notes: tuple[str, ...], model: str) -> DecisionAnswer:
+    """The model's answer to one item. Its choice is matched to an option ignoring case and its confidence is read as
+    a number from 0 to 1; the answer then has to fit the item's schema, or it has no usable answer (error)."""
+    unusable = DecisionAnswer(id=item.id, choice=None, confidence=None, provider="model", model=model,
+                              error="invalid_decision_output")
+    if not isinstance(raw, Mapping):
+        return unusable
+    answer, notes = dict(raw), list(notes)
+    choice = _match_option(answer.get("choice"), item.options)
+    if choice is not None and choice != answer["choice"]:
+        notes.append(f"choice {answer['choice']!r} read as {choice!r}")
+        answer["choice"] = choice
+    confidence = _read_confidence(answer.get("confidence"))
+    if confidence is not None and confidence[1]:
+        notes.append(f"confidence {answer['confidence']!r} read as {confidence[0]!r}")
+    if confidence is not None:
+        answer["confidence"] = confidence[0]
+    if next(Draft202012Validator(dict(schema)).iter_errors(answer), None):
+        return unusable
+    return DecisionAnswer(id=item.id, choice=answer["choice"], confidence=answer["confidence"],
+                          evidence=tuple(answer["evidence_quotes"]), rationale=answer["rationale"],
+                          provider="model", model=model, notes=tuple(notes))
+
+
+def _match_option(value: Any, options: Sequence[str]) -> str | None:
+    """The option a choice names, ignoring case and spaces around it; None when it names none, or two."""
+    if not isinstance(value, str):
+        return None
+    if value in options:
+        return value
+    wanted = value.strip().casefold()
+    found = [option for option in options if option.casefold() == wanted]
+    return found[0] if len(found) == 1 else None
+
+
+def _read_confidence(value: Any) -> tuple[Any, bool] | None:
+    """(a confidence from 0 to 1, whether it was changed to get there), or None when `value` is neither such a number
+    nor one written as text ("0.9") or as a percentage (92, "92%"). A number above 1 and up to 100 is a percentage."""
+    percent = False
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        number = Decimal(str(value))
+    elif isinstance(value, str):
+        text = value.strip()
+        percent = text.endswith("%")
+        text = text[:-1].strip() if percent else text
+        if not UNSIGNED_NUMBER.fullmatch(text):
+            return None
+        number = Decimal(text)
+    else:
+        return None
+    if percent or number > 1:
+        return (float(number / 100), True) if 0 <= number <= 100 else None
+    if number < 0:
+        return None
+    return (float(number), True) if isinstance(value, str) else (value, False)
 
 
 def _prepare(items: Sequence[DecisionItem]) -> list[DecisionItem]:
@@ -160,7 +227,7 @@ def _prepare(items: Sequence[DecisionItem]) -> list[DecisionItem]:
 
 class DecisionRouter:
     """One decider for every item: the plugged-in DecisionPort when there is one, else the model. An answer below
-    the threshold (or none_apply, or no answer) goes to a person."""
+    the threshold (or none_apply, or no answer, or one that could not be read) goes to a person."""
 
     def __init__(self, *, model: ModelDecisions, provider: DecisionPort | None = None) -> None:
         self.model = model
@@ -193,10 +260,11 @@ class DecisionRouter:
         outcomes = []
         for item in items:
             answer = answers.get(item.id)
-            if answer is None:
-                record = {"rung": rung, "provider": rung, "model": None, "run_id": run_id, "choice": None,
+            if answer is None or answer.error:
+                record = {"rung": rung, "provider": (answer.provider if answer else "") or rung,
+                          "model": answer.model if answer else None, "run_id": run_id, "choice": None,
                           "confidence": None, "accepted": False, "evidence": [],
-                          "error": error or "missing_answer"}
+                          "error": (answer.error if answer else None) or error or "missing_answer"}
                 outcomes.append(DecisionOutcome(item.id, None, None, None, True, (), "", (record,)))
                 continue
             accepted = (answer.choice in item.options and answer.choice != NONE_OPTION
@@ -204,6 +272,8 @@ class DecisionRouter:
             record = {"rung": rung, "provider": answer.provider or rung, "model": answer.model, "run_id": run_id,
                       "choice": answer.choice, "confidence": answer.confidence, "accepted": accepted,
                       "evidence": list(answer.evidence)[:5]}
+            if answer.notes:
+                record["normalized"] = list(answer.notes)
             if accepted:
                 outcomes.append(DecisionOutcome(item.id, answer.choice, answer.confidence, rung, False,
                                                 tuple(answer.evidence), answer.rationale, (record,)))

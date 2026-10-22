@@ -469,3 +469,27 @@ def test_decision_review_survives_resume_without_new_calls(tmp_path):
     again = ex_b.advance("o", RUN)
     assert port_b.calls == [] and model_b.calls == []
     assert _rec(again, "assess")["approval_id"] == review["approval_id"] and len(_pending(store)) == 1
+
+
+def test_one_unreadable_model_answer_asks_a_person_about_that_item_only(tmp_path):
+    model = FakeModel(decide_overrides={"bank_statements": {"choice": "no idea"},
+                                        "photo_id": {"choice": "Missing", "confidence": "92%"}})
+    ex, store, _ = executor_for(tmp_path, model, decisions=False)
+    _start(ex)
+    run = ex.advance("o", RUN)
+    assert run["state"] == "waiting_approval" and model.count("decide") == 1
+    [review] = _pending(store)
+    assert review["kind"] == "decision_review" and [i["id"] for i in review["items"]] == ["bank_statements"]
+    assess = _rec(run, "assess")
+    by_item = {d["item_id"]: d for d in assess["decisions"]}
+    assert by_item["bank_statements"]["error"] == "invalid_decision_output"
+    assert not by_item["bank_statements"]["accepted"]
+    assert by_item["photo_id"]["accepted"] and by_item["photo_id"]["choice"] == "missing"
+    assert by_item["photo_id"]["confidence"] == 0.92
+    assert by_item["photo_id"]["normalized"] == ["choice 'Missing' read as 'missing'",
+                                                 "confidence '92%' read as 0.92"]
+    assert sum(1 for d in assess["decisions"] if d["accepted"]) == 5
+    run = ex.decide("o", review["approval_id"], actor="o", decision="choose",
+                    content_digest=review["content_digest"], choices={"bank_statements": "present"})
+    statuses = {i["id"]: i["status"] for i in _rec(run, "assess")["output"]["items"]}
+    assert statuses["bank_statements"] == "present" and statuses["photo_id"] == "missing"
