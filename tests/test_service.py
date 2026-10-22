@@ -109,6 +109,19 @@ def test_a_build_that_stays_invalid_is_422_and_the_failure_is_kept_for_the_actio
     assert model.count("compile") == 2 and svc.catalog(ORG)["creations"] == []
 
 
+def test_a_build_the_engine_had_to_tidy_says_so_and_a_clean_one_does_not(tmp_path):
+    payload = _payload()
+    payload["spec"]["steps"][0]["id"] = "Collect"
+    svc = service_for(tmp_path, FakeModel(compile_outputs=[payload]))
+    created = svc.create(ORG, "c1", ACCOUNTING["description"])
+    notes = created["authoring_notes"]
+    assert len(notes) == 1 and notes[0].startswith("Step ids were lower-cased") and "Collect to collect" in notes[0]
+    assert svc.detail(ORG, created["instance"]["instance_id"])["creation"]["authoring_notes"] == notes
+    assert created["workflow"]["spec"]["steps"][0]["id"] == "collect"
+    clean = _created(tmp_path / "clean")[2]
+    assert "authoring_notes" not in clean
+
+
 def test_an_unavailable_model_is_503(tmp_path):
     svc = service_for(tmp_path, FakeModel(fail_operations={"compile"}))
     err = _expect(503, "model_unavailable", lambda: svc.create(ORG, "c1", ACCOUNTING["description"]))

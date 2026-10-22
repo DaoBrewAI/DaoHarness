@@ -683,6 +683,8 @@ def cmd_new(ui: UI, client: Client, args: argparse.Namespace) -> None:
     receipt = creation.get("authoring_receipt") or {}
     ui.p(s.green("✓ ") + f"Built in {clock(time.monotonic() - started)}"
          + (s.dim(f" · {receipt['model']}") if receipt.get("model") else ""))
+    for note in creation.get("authoring_notes") or []:   # what the engine tidied to read the model's output
+        ui.p(s.dim(f"  Note: {note}"))
     if creation.get("new_version_of"):
         ui.p(s.dim(f"  A new version of “{creation['new_version_of']}”"))
     ui.p()

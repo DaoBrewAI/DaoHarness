@@ -1,5 +1,6 @@
 """The compiler: a description -> strict-JSON model output -> a validated WorkflowSpec, with one retry."""
 import copy
+import dataclasses
 import json
 
 import pytest
@@ -11,7 +12,7 @@ from daoharness.ports import ModelError
 from daoharness.primitives import builtin_catalog
 from daoharness.spec import WorkflowSpec
 from daoharness.validator import ValidationContext
-from industry_fixtures import ACCOUNTING
+from industry_fixtures import ACCOUNTING, recruiting_fan_out_spec
 from workflow_fakes import FakeModel, as_model_payload
 
 IDS = builtin_catalog().ids()
@@ -180,3 +181,117 @@ def test_a_model_error_propagates_with_the_receipts_so_far():
     with pytest.raises(ModelError) as info:
         _compile(model)
     assert info.value.code == "provider_failed" and [r["run_id"] for r in info.value.receipts] == ["fake-1"]
+
+
+# --- step ids in another case ------------------------------------------------------------------------------------
+
+def _recased(payload, ids=None, refs=None):
+    """The payload with step ids and step references written through `ids` and `refs`, like a model that mixes case."""
+    for step in payload["spec"]["steps"]:
+        if ids:
+            step["id"] = ids(step["id"])
+        if refs:
+            step["inputs"] = [f"step:{refs(r[5:])}" if r.startswith("step:") else r for r in step["inputs"]]
+    return payload
+
+
+@pytest.mark.parametrize("ids, refs", [(str.title, None), (None, str.title), (str.upper, str.upper),
+                                       (str.title, str.upper)], ids=["ids", "references", "both", "disagreeing"])
+def test_step_ids_in_another_case_are_lowercased_with_every_reference_and_the_build_says_so(ids, refs):
+    model = FakeModel(compile_outputs=[_recased(_payload(), ids, refs)])
+    result = _compile(model)
+    assert _plain(result.spec) == EXPECTED and model.count("compile") == 1
+    [note] = result.notes
+    assert "lower-cased" in note
+
+
+def test_the_note_names_the_ids_it_changed():
+    [note] = _compile(FakeModel(compile_outputs=[_recased(_payload(), ids=str.title)])).notes
+    assert note == ("Step ids were lower-cased, with every reference to them: Collect to collect, "
+                    "Extract to extract, Assess to assess, and 6 more.")
+
+
+def test_only_references_in_another_case_are_noted_as_references():
+    notes = _compile(FakeModel(compile_outputs=[_recased(_payload(), refs=str.upper)])).notes
+    assert notes == ("References to step ids were lower-cased.",)
+
+
+def test_for_each_and_declared_gaps_follow_the_lowercased_ids():
+    payload = as_model_payload(recruiting_fan_out_spec(),
+                               gaps=[{"step_id": "Outreach", "kind": "needs_capability", "detail": "send email"}])
+    for step in payload["spec"]["steps"]:
+        step["id"] = step["id"].title()
+        if step["for_each"]:
+            step["for_each"] = step["for_each"].title()
+    result = _compile(FakeModel(compile_outputs=[payload]))
+    assert result.spec.step("route").for_each == "split"
+    assert list(result.gaps) == [{"step_id": "outreach", "kind": "needs_capability", "detail": "send email"}]
+
+
+def test_a_build_with_lowercase_ids_has_no_notes():
+    assert _compile(FakeModel(compile_outputs=[_payload()])).notes == ()
+
+
+def test_two_ids_that_differ_only_in_case_are_still_a_duplicate():
+    payload = _payload()
+    payload["spec"]["steps"][2]["id"] = "Extract"
+    model = FakeModel(compile_outputs=[payload, copy.deepcopy(payload)])
+    with pytest.raises(CompileError) as info:
+        _compile(model)
+    assert "invalid_spec:duplicate_step_id:extract" in info.value.errors
+
+
+def test_a_reference_to_a_step_that_does_not_exist_is_still_refused_in_any_case():
+    payload = _payload()
+    payload["spec"]["steps"][2]["inputs"] = ["step:Nowhere"]
+    model = FakeModel(compile_outputs=[payload, copy.deepcopy(payload)])
+    with pytest.raises(CompileError) as info:
+        _compile(model)
+    assert "forward_or_unknown_step:assess:nowhere" in info.value.errors
+
+
+def test_what_the_model_tidied_in_its_reply_is_in_the_notes():
+    model = FakeModel(compile_outputs=[_payload()])
+    generate = model.generate
+
+    def tidying(**kw):
+        content, receipt = generate(**kw)
+        return content, dataclasses.replace(receipt, repairs=("removed a code fence", "removed a trailing comma"))
+
+    model.generate = tidying
+    result = _compile(model)
+    assert result.notes == ("The model's reply was tidied before it was read: removed a code fence, "
+                            "removed a trailing comma.",)
+    assert result.receipts[0]["repairs"] == ["removed a code fence", "removed a trailing comma"]
+
+
+# --- config_json written with a fence or a trailing comma ---------------------------------------------------------
+
+def test_config_json_in_a_fence_or_with_a_trailing_comma_is_read_and_noted():
+    payload = _payload()
+    config = json.dumps(ACCOUNTING["spec"]["steps"][1]["config"])
+    payload["spec"]["steps"][1]["config_json"] = "```json\n" + config[:-1] + ",}\n```"
+    result = _compile(FakeModel(compile_outputs=[payload]))
+    assert _plain(result.spec) == EXPECTED
+    assert result.notes == ("Step extract: config_json was tidied: removed a code fence, "
+                            "removed a trailing comma.",)
+
+
+@pytest.mark.parametrize("config_json", ["Here is the config: {}", "{} and then some", "<think>x</think>{}",
+                                         "[{}]", "{'a': 1}"])
+def test_config_json_with_anything_else_around_it_is_still_refused(config_json):
+    bad = _payload()
+    bad["spec"]["steps"][1]["config_json"] = config_json
+    model = FakeModel(compile_outputs=[bad, _payload()])
+    _compile(model)
+    assert "invalid_config_json:extract" in model.calls[1]["input"]["previous_attempt_errors"]
+
+
+def test_the_retry_names_a_step_by_the_id_the_build_uses_even_when_it_was_written_in_capitals():
+    bad = _recased(_payload(), ids=str.title)
+    bad["spec"]["steps"][1]["config_json"] = "{not json"
+    model = FakeModel(compile_outputs=[bad, _payload()])
+    _compile(model)
+    errors = model.calls[1]["input"]["previous_attempt_errors"]
+    assert "invalid_config_json:extract" in errors
+    assert any(e.startswith("config_json_problem:extract:") for e in errors)

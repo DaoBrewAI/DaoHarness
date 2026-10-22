@@ -4,6 +4,7 @@
 
 - A new README: DaoHarness Skeleton, a recorded run, how it works, Skeleton and hosted, FAQ.
 - Issue forms, a pull request template and AGENTS.md.
+- Model replies with `<think>` blocks, code fences, trailing commas or capitalised step ids are tidied and recorded.
 
 ## 0.1.0 · 2026-10-22
 

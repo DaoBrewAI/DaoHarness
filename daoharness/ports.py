@@ -22,15 +22,20 @@ class ModelReceipt:
     input_tokens: int | None = None
     output_tokens: int | None = None
     tokens_estimated: bool | None = None
+    # What was taken off the reply to read it (a code fence, a trailing comma...); not in to_dict when nothing was.
+    repairs: tuple[str, ...] | None = None
 
     def to_dict(self) -> dict:
-        return {k: v for k, v in asdict(self).items() if v is not None}
+        return {k: list(v) if isinstance(v, tuple) else v for k, v in asdict(self).items() if v is not None}
 
 
 class ModelError(RuntimeError):
-    def __init__(self, code: str) -> None:
+    """`code` says what went wrong; `detail` adds to it where that helps a person (never the model's own words)."""
+
+    def __init__(self, code: str, detail: str = "") -> None:
         super().__init__(code)
         self.code = code
+        self.detail = detail
 
 
 class ModelPort(Protocol):

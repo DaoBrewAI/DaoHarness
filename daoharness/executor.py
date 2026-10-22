@@ -1315,6 +1315,8 @@ class WorkflowExecutor:
             output, receipt = entry["output"], entry["receipt"]
         output, checks = apply_guardrails(primitive, step, output, inputs if guard_inputs is None else guard_inputs,
                                           spec)
+        if receipt.get("repairs"):   # the reply needed tidying to be read: the step's record keeps that
+            checks.append(Check("reply_tidied", True, "; ".join(receipt["repairs"])))
         decision_record: list[dict] = []
         rules = step.config.get("rules") if primitive.id == "draft_message" else None
         if rules and all(c.passed for c in checks):

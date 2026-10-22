@@ -65,7 +65,7 @@ def local(tmp_path, monkeypatch):
     def run(command, *rest):
         return cli.main([command, "--url", url, "--no-color", *rest])
 
-    yield SimpleNamespace(url=url, home=home, run=run)
+    yield SimpleNamespace(url=url, home=home, run=run, model=model)
     server.should_exit = True
     thread.join(timeout=5)
 
@@ -105,6 +105,18 @@ def test_build_save_and_run_with_a_batch_review(local, tmp_path, capsys, monkeyp
     assert "Nothing is waiting for you" in capsys.readouterr().out
     assert local.run("ls") == 0
     assert "1 run, last complete" in capsys.readouterr().out
+
+
+def test_a_build_the_engine_tidied_is_announced_with_the_workflow(local, capsys):
+    payload = as_model_payload(recruiting_fan_out_spec())
+    for step in payload["spec"]["steps"]:
+        step["id"] = step["id"].title()
+        step["for_each"] = step["for_each"] and step["for_each"].title()
+    local.model.compile_outputs[:] = [payload]
+    assert local.run("new", "Screen each applicant", "--save") == 0
+    out = capsys.readouterr().out
+    assert "Note: Step ids were lower-cased, with every reference to them: Collect to collect" in out
+    assert "Saved as version 1" in out
 
 
 def test_a_run_needs_input_when_the_server_makes_no_examples(local, capsys):

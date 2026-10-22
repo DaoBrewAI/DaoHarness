@@ -9,7 +9,9 @@ nowhere else.
 
 Every schema the engine sends is strict-mode safe (tests/test_model_schemas.py), so the adapter asks for strict
 structured output first. An endpoint that rejects it gets JSON mode, then a plain request, and the adapter
-remembers what worked. It returns any JSON object it gets; the engine checks it against the schema.
+remembers what worked. It returns any JSON object it gets; the engine checks it against the schema. A reply wrapped in
+thinking, a code fence or a sentence, or with a trailing comma, is read once those are taken off, and the receipt says
+what was taken off (json_text.py).
 """
 from __future__ import annotations
 
@@ -25,6 +27,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
+from ..json_text import JsonTextError, read_json_object
 from ..ports import ModelError, ModelReceipt
 from ..spec import canonical_json, digest
 
@@ -101,9 +104,10 @@ class OpenAICompatibleModel:
                     raise ModelError("provider_rejected") from None
                 self.mode = MODES[MODES.index(self.mode) + 1]
         text = _reply_text(reply)
-        content = parse_json_object(text)
-        if content is None:
-            raise ModelError("invalid_model_json")
+        try:
+            content, repairs = read_json_object(text)
+        except JsonTextError as exc:
+            raise ModelError("invalid_model_json", exc.reason) from None
         usage = reply.get("usage") if isinstance(reply.get("usage"), Mapping) else {}
         sent = canonical_json(body["messages"])
         measured = isinstance(usage.get("prompt_tokens"), int) and isinstance(usage.get("completion_tokens"), int)
@@ -112,7 +116,7 @@ class OpenAICompatibleModel:
             model=str(reply.get("model") or self.model), output_digest=digest(content),
             input_tokens=usage["prompt_tokens"] if measured else -(-len(sent) // CHARS_PER_TOKEN),
             output_tokens=usage["completion_tokens"] if measured else -(-len(text) // CHARS_PER_TOKEN),
-            tokens_estimated=not measured)
+            tokens_estimated=not measured, repairs=tuple(repairs) or None)
 
     # -- request ------------------------------------------------------------------------------------------------
 
@@ -201,19 +205,10 @@ def _reply_text(reply: Mapping[str, Any]) -> str:
 
 
 def parse_json_object(text: str) -> dict | None:
-    """The JSON object in a reply: the whole text, or the object inside a code fence or surrounding prose."""
-    text = text.strip()
-    pieces = [text]
-    fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, flags=re.S)
-    if fenced:
-        pieces.append(fenced.group(1))
-    if "{" in text and "}" in text:
-        pieces.append(text[text.index("{"): text.rindex("}") + 1])
-    for piece in pieces:
-        try:
-            value = json.loads(piece)
-        except ValueError:
-            continue
-        if isinstance(value, dict):
-            return value
-    return None
+    """The JSON object in a reply, or None. Thinking, a code fence, a sentence around the object and a trailing comma
+    are taken off; a second value or anything that is not strict JSON is not (generate() says what it took off, and
+    why it refused)."""
+    try:
+        return read_json_object(text)[0]
+    except JsonTextError:
+        return None

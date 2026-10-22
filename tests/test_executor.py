@@ -1,4 +1,5 @@
 import copy
+import dataclasses
 import threading
 
 import pytest
@@ -588,3 +589,25 @@ def test_summary_citations_may_name_steps_upstream_of_its_inputs():
                                      {"step:approval": {"content": {}}}, spec)
     assert fixed["sections"][0]["source_steps"] == ["draft", "approval"]
     assert all(c.passed for c in checks)
+
+
+def test_a_reply_the_adapter_tidied_leaves_a_check_on_its_step(tmp_path):
+    model = FakeModel()
+    generate = model.generate
+
+    def tidied(**kw):
+        content, receipt = generate(**kw)
+        return content, dataclasses.replace(receipt, repairs=("removed a code fence", "removed a trailing comma"))
+
+    model.generate = tidied
+    ex, _, _ = executor_for(tmp_path, model)
+    _start(ex, AUTO)
+    run = ex.advance("o", "i.r1")
+    assert run["state"] == "completed"
+    check = {"id": "reply_tidied", "passed": True, "detail": "removed a code fence; removed a trailing comma"}
+    assert check in _step_rec(run, "extract")["checks"] and check in _step_rec(run, "summary")["checks"]
+    assert all(c["id"] != "reply_tidied" for c in _step_rec(run, "collect")["checks"])
+    clean_ex, _, _ = executor_for(tmp_path / "clean", FakeModel())
+    _start(clean_ex, AUTO)
+    clean = clean_ex.advance("o", "i.r1")
+    assert all(c["id"] != "reply_tidied" for s in clean["steps"] for c in s["checks"])

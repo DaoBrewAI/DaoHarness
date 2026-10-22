@@ -336,6 +336,8 @@ class WorkflowService:
                          "gaps": copy.deepcopy(source.get("gaps") or []), "questions": [], "diff": None}}
         if draft.get("receipts"):
             view["authoring_receipt"] = dict(draft["receipts"][-1])
+        if draft.get("notes"):
+            view["authoring_notes"] = list(draft["notes"])
         return view
 
     def _readiness(self, org: str, rec: Mapping) -> tuple[dict, list[str], dict]:
@@ -514,6 +516,8 @@ class WorkflowService:
                              "gaps": [dict(g) for g in result.gaps], "receipts": [dict(r) for r in result.receipts],
                              "created_at": now},
                    "version": None, "run_actions": []}
+            if result.notes:   # what was tidied to read the model's output; absent from a clean build
+                rec["draft"]["notes"] = list(result.notes)
             with self.store.locked(org):
                 self._write(org, rec)
             return self._creation_view(rec)

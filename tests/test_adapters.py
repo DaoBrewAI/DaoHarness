@@ -7,7 +7,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from daoharness.adapters import OpenAICompatibleModel, parse_json_object
+from daoharness.compiler import WorkflowCompiler
 from daoharness.ports import ModelError, ModelReceipt
+from daoharness.primitives import builtin_catalog
+from daoharness.validator import ValidationContext
+from industry_fixtures import ACCOUNTING
+from workflow_fakes import as_model_payload
 
 SCHEMA = {"type": "object", "properties": {"a": {"type": "integer"}}, "required": ["a"], "additionalProperties": False}
 
@@ -183,3 +188,85 @@ def test_from_env_presets_and_errors():
                             ({"DAOHARNESS_PROVIDER": "nope", "DAOHARNESS_MODEL": "m"}, "Unknown")]:
         with pytest.raises(ValueError, match=wanted):
             OpenAICompatibleModel.from_env(environ)
+
+
+# --- replies as models really send them ----------------------------------------------------------------------------
+
+# Wrapped in thinking, a code fence or prose, or with a comma left before a closing bracket: the whole object is there.
+TIDY_REPLIES = [
+    pytest.param('<think>The shape is {"a": ...}. Let me fill it in.</think>\n{"a": 1}', {"a": 1}, id="think-braces"),
+    pytest.param('<think>{ draft }</think>\n```json\n{"a": 1}\n```', {"a": 1}, id="think-then-fence"),
+    pytest.param('Reasoning with {braces} first.\n</think>\n{"a": 1}', {"a": 1}, id="closing-think-only"),
+    pytest.param('```json\n{"a": 1}', {"a": 1}, id="fence-never-closed"),
+    pytest.param('{"a": 1}\n```', {"a": 1}, id="fence-only-after"),
+    pytest.param('```json\n```json\n{"a": 1}\n```\n```', {"a": 1}, id="fence-twice"),
+    pytest.param('{"a": 1,}', {"a": 1}, id="trailing-comma"),
+    pytest.param('{"a": 1, "b": [1, 2, 3,], "c": {"d": 4,\n},\n}', {"a": 1, "b": [1, 2, 3], "c": {"d": 4}},
+                 id="trailing-commas-nested"),
+    pytest.param('{"a": "x,}", "b": ["y, ]",]}', {"a": "x,}", "b": ["y, ]"]}, id="commas-in-strings-stay"),
+    pytest.param('<think>try {"a": 0}</think>Here you go:\n```json\n{"a": 1, "b": [2,],}\n```\nHope that helps!',
+                 {"a": 1, "b": [2]}, id="everything-at-once"),
+]
+
+# More than the one object, or something that is not strict JSON: never guessed at, never cut short.
+REFUSED_REPLIES = [
+    pytest.param('{"a": 1}\n{"a": 2}', id="two-objects"),
+    pytest.param('```json\n{"a": 1}\n```\n```json\n{"a": 2}\n```', id="two-objects-in-two-fences"),
+    pytest.param('{"a": 1} [1, 2]', id="object-then-list"),
+    pytest.param('{"a": 1}}', id="stray-closing-brace"),
+    pytest.param('[{"a": 1}]', id="list-holding-the-object"),
+    pytest.param("{'a': 1}", id="single-quotes"),
+    pytest.param("{a: 1}", id="unquoted-key"),
+    pytest.param('{"a": 1 // one\n}', id="comment"),
+    pytest.param('{"a": 1 "b": 2}', id="missing-comma"),
+    pytest.param('{"a": [,1]}', id="comma-before-the-first-value"),
+    pytest.param('{"a": [1,,2]}', id="doubled-comma"),
+    pytest.param('{"a": [1, 2', id="cut-off"),
+    pytest.param('<think>{"a": 1}', id="think-never-closed"),
+]
+
+
+@pytest.mark.parametrize("reply, expected", TIDY_REPLIES)
+def test_a_wrapped_reply_gives_its_object(reply, expected):
+    assert parse_json_object(reply) == expected
+
+
+@pytest.mark.parametrize("reply", REFUSED_REPLIES)
+def test_a_reply_with_more_than_the_object_or_broken_json_is_refused(reply):
+    assert parse_json_object(reply) is None
+
+
+def test_what_was_tidied_is_in_the_receipt(serve):
+    server = serve(lambda m, p, b: completion('<think>x {y}</think>\n```json\n{"a": 1,}\n```'))
+    content, receipt = call(model_for(server))
+    assert content == {"a": 1}
+    assert receipt.repairs == ("removed a <think> block", "removed a code fence", "removed a trailing comma")
+    assert receipt.to_dict()["repairs"] == list(receipt.repairs)
+    _, clean = call(model_for(serve(lambda m, p, b: completion('{"a": 1}'))))
+    assert clean.repairs is None and "repairs" not in clean.to_dict()
+
+
+def test_extra_data_after_the_object_is_an_error_that_says_so(serve):
+    server = serve(lambda m, p, b: completion('{"a": 1}\n{"a": 2}'))
+    with pytest.raises(ModelError) as raised:
+        call(model_for(server))
+    assert raised.value.code == "invalid_model_json"
+    assert "extra data after the JSON object" in raised.value.detail
+
+
+def test_a_messy_reply_still_builds_a_validated_workflow(serve):
+    """Thinking with braces, a fence, a trailing comma and a capitalised step id: tidied, then checked as usual."""
+    payload = as_model_payload(ACCOUNTING["spec"])
+    payload["spec"]["steps"][0]["id"] = "Collect"
+    reply = ("<think>The first step is {collect}, then the rest.</think>\n```json\n"
+             + json.dumps(payload).replace('"declared_gaps": []}', '"declared_gaps": [],}') + "\n```")
+    assert reply.endswith(',}\n```')
+    server = serve(lambda m, p, b: completion(reply))
+    ctx = ValidationContext(builtin_catalog(), lambda role: True)
+    result = WorkflowCompiler(model_for(server)).compile(
+        org_id="o", description="Intake.", ctx=ctx, primitive_refs=builtin_catalog().ids())
+    assert [s.id for s in result.spec.steps][:2] == ["collect", "extract"]
+    assert result.receipts[0]["repairs"] == ["removed a <think> block", "removed a code fence",
+                                             "removed a trailing comma"]
+    assert any("<think> block" in note for note in result.notes)
+    assert any("lower-cased" in note for note in result.notes)
