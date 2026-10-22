@@ -3,7 +3,7 @@
 ## Unreleased
 
 - A new README: DaoHarness Skeleton, a recorded run, how it works, Skeleton and hosted, FAQ.
-- Issue forms, a pull request template, Dependabot and AGENTS.md.
+- Issue forms, a pull request template and AGENTS.md.
 
 ## 0.1.0 · 2026-10-22
 
