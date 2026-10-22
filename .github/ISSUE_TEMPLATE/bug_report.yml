@@ -1,0 +1,28 @@
+name: Bug report
+description: Something did not work as described
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected and what you got. Paste the terminal output if you can.
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Provider and model
+      placeholder: "openai / gpt-…, gemini / …, ollama / …, or the stand-in demo"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Python version and OS
+      placeholder: "3.12 on macOS 15"
+  - type: textarea
+    id: sentence
+    attributes:
+      label: The one sentence (if it was a build)
+      description: Leave out anything confidential. Never paste keys, session cookies or client data.
