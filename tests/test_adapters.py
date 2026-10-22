@@ -177,6 +177,23 @@ def test_a_slow_provider_gets_one_more_wait_not_three(serve):
     assert raised.value.code == "provider_timeout" and len(server.requests) == 2
 
 
+def test_a_step_is_asked_again_sooner_than_a_build(serve):
+    server = serve(lambda m, p, b: (time.sleep(0.4), completion('{"a": 7}'))[1])
+    model = model_for(server, timeout=2.0, step_timeout=0.1, mode="json_object")
+    with pytest.raises(ModelError) as raised:
+        call(model, operation="step")
+    assert raised.value.code == "provider_timeout" and len(server.requests) == 2
+    assert call(model, operation="compile")[0] == {"a": 7}
+
+
+def test_daoharness_timeout_sets_every_wait():
+    model = OpenAICompatibleModel.from_env({"DAOHARNESS_BASE_URL": "http://127.0.0.1:1/v1", "DAOHARNESS_MODEL": "m",
+                                            "DAOHARNESS_TIMEOUT": "600"})
+    assert (model.timeout, model.step_timeout) == (600.0, 600.0)
+    plain = OpenAICompatibleModel.from_env({"DAOHARNESS_BASE_URL": "http://127.0.0.1:1/v1", "DAOHARNESS_MODEL": "m"})
+    assert (plain.timeout, plain.step_timeout) == (300.0, 90.0)
+
+
 def test_without_usage_tokens_are_estimated(serve):
     server = serve(lambda m, p, b: completion('{"a": 4}'))
     _, receipt = call(model_for(server))

@@ -69,6 +69,7 @@ Run `daoharness new` in a second terminal.
 | `DAOHARNESS_MODEL` | The model to use |
 | `DAOHARNESS_API_KEY` | Your key, if the provider's usual variable (`OPENAI_API_KEY`, `GEMINI_API_KEY`, ...) is not set |
 | `DAOHARNESS_MAX_TOKENS` | Optional cap on each reply |
+| `DAOHARNESS_TIMEOUT` | Optional seconds to wait for each reply (default 300 for a build, 90 for a step) |
 
 | Command | What it does |
 |---|---|

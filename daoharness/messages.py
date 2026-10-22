@@ -34,7 +34,8 @@ MODEL_ERRORS: dict[str, tuple[str, str]] = {
         "certificate."),
     "provider_timeout": (
         "The model provider did not answer in time.",
-        "A slow or busy model can take longer than we wait: try again, or use a faster model."),
+        "A slow or busy model can take longer than we wait: try again, set DAOHARNESS_TIMEOUT to the seconds to wait, "
+        "or use a faster model."),
     "provider_bad_reply": (
         "The model provider's answer was not in the format an OpenAI-compatible endpoint sends.",
         "Check that DAOHARNESS_BASE_URL is its API address (it usually ends in /v1)."),

@@ -68,7 +68,8 @@ class OpenAICompatibleModel:
     model: str
     api_key: str | None = None
     provider: str = "openai-compatible"
-    timeout: float = 300.0
+    timeout: float = 300.0        # seconds to wait for a build (compile) reply
+    step_timeout: float = 90.0    # for every other reply: a provider that stalls on a step is asked again sooner
     max_tokens: int | None = None
     headers: Mapping[str, str] = field(default_factory=dict)
     mode: str = ""   # the first mode to try: strict, or JSON mode for JSON_MODE_FIRST hosts
@@ -83,7 +84,7 @@ class OpenAICompatibleModel:
     def from_env(cls, environ: Mapping[str, str] = os.environ) -> "OpenAICompatibleModel":
         """DAOHARNESS_PROVIDER (one of PRESETS) or DAOHARNESS_BASE_URL; DAOHARNESS_MODEL; the key from
         DAOHARNESS_API_KEY or the provider's usual variable (OPENAI_API_KEY, GEMINI_API_KEY, ...);
-        DAOHARNESS_MAX_TOKENS optionally."""
+        DAOHARNESS_MAX_TOKENS and DAOHARNESS_TIMEOUT (seconds, for every reply) optionally."""
         provider = (environ.get("DAOHARNESS_PROVIDER") or "").strip().lower()
         if provider and provider not in PRESETS:
             raise ValueError(f"Unknown DAOHARNESS_PROVIDER {provider!r}. Use one of: {', '.join(PRESETS)}, "
@@ -99,9 +100,12 @@ class OpenAICompatibleModel:
         if key_variable and not api_key:
             raise ValueError(f"Set {key_variable} (or DAOHARNESS_API_KEY) to your {provider} key.")
         max_tokens = environ.get("DAOHARNESS_MAX_TOKENS")
+        waits = {"timeout": float(environ["DAOHARNESS_TIMEOUT"])} if environ.get("DAOHARNESS_TIMEOUT") else {}
+        if waits:
+            waits["step_timeout"] = waits["timeout"]
         return cls(base_url=base_url.rstrip("/"), model=model, api_key=api_key or None,
                    provider=provider or (urllib.parse.urlsplit(base_url).hostname or "openai-compatible"),
-                   max_tokens=int(max_tokens) if max_tokens else None)
+                   max_tokens=int(max_tokens) if max_tokens else None, **waits)
 
     # -- ModelPort ---------------------------------------------------------------------------------------------
 
@@ -109,10 +113,11 @@ class OpenAICompatibleModel:
                  instructions: str, evidence: Sequence[Mapping[str, Any]], schema: Mapping[str, Any]
                  ) -> tuple[dict, ModelReceipt]:
         mode = self.mode
+        timeout = self.timeout if operation == "compile" else min(self.step_timeout, self.timeout)
         while True:
             body = self._body(operation, input_data, instructions, evidence, schema, mode)
             try:
-                reply = self._post(body)
+                reply = self._post(body, timeout)
                 break
             except _ModeRejected as rejected:
                 if mode == MODES[-1]:
@@ -157,7 +162,7 @@ class OpenAICompatibleModel:
             body["max_tokens"] = self.max_tokens
         return body
 
-    def _post(self, body: dict) -> dict:
+    def _post(self, body: dict, timeout: float) -> dict:
         headers = {"Content-Type": "application/json", "Accept": "application/json",
                    "User-Agent": "daoharness", **dict(self.headers)}
         if self.api_key:
@@ -167,7 +172,7 @@ class OpenAICompatibleModel:
             request = urllib.request.Request(f"{self.base_url}/chat/completions", data=data, headers=headers,
                                              method="POST")
             try:
-                with urllib.request.urlopen(request, timeout=self.timeout, context=ssl.create_default_context()) as response:
+                with urllib.request.urlopen(request, timeout=timeout, context=ssl.create_default_context()) as response:
                     reply = json.loads(response.read().decode("utf-8"))
                 if not isinstance(reply, dict):
                     raise ModelError("provider_bad_reply")
