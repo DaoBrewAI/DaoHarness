@@ -1,7 +1,7 @@
 """Local JSON file store: one private directory per org, atomic writes, per-org reentrant lock."""
 from __future__ import annotations
 
-import fcntl
+import errno
 import hashlib
 import json
 import os
@@ -13,10 +13,43 @@ from typing import Any, Iterator, Mapping
 
 from .spec import canonical_json
 
+try:
+    import fcntl
+except ImportError:   # Windows has no fcntl: msvcrt locks a byte range of the file instead
+    fcntl = None
+    import msvcrt
+LOCK_BACKEND = "fcntl" if fcntl is not None else "msvcrt"
+LOCK_TIMED_OUT = getattr(errno, "EDEADLOCK", 36)   # what msvcrt.locking raises after ten seconds of waiting
 COLLECTIONS = frozenset({"workflows", "runs", "samples", "actions", "approvals", "notifications",
                          "decision_labels", "step_cache", "primitives", "primitive_drafts", "metrics", "settings"})
 # Lowercase only: APFS is case-insensitive, so mixed-case keys could alias one file. Used with fullmatch.
 KEY = re.compile(r"[a-z0-9_][a-z0-9_.-]{0,199}")
+
+
+def _lock(handle) -> None:
+    """Take an exclusive lock on the open lock file, waiting until it is free."""
+    if fcntl is not None:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        return
+    handle.seek(0)
+    while True:   # msvcrt.locking gives up after about ten seconds; flock waits for ever, so this waits on
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            return
+        except OSError as exc:
+            if exc.errno != LOCK_TIMED_OUT:
+                raise
+
+
+def _unlock(handle) -> None:
+    if fcntl is not None:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+        return
+    handle.seek(0)
+    try:
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    except OSError:   # closing the file lets go of it anyway
+        pass
 
 
 class WorkflowStoreError(RuntimeError):
@@ -110,11 +143,12 @@ class FileWorkflowStore:
                 if depth == 0:
                     fd = os.open(org_dir / ".lock", os.O_RDWR | os.O_CREAT, 0o600)
                     handle = os.fdopen(fd, "r+")
-                    os.fchmod(fd, 0o600)  # O_CREAT's mode applies only on creation; repair an older lock file
-                    fcntl.flock(handle, fcntl.LOCK_EX)
+                    if hasattr(os, "fchmod"):   # Windows has it only from Python 3.13
+                        os.fchmod(fd, 0o600)  # O_CREAT's mode applies only on creation; repair an older lock file
+                    _lock(handle)
                 yield
             finally:
                 if handle is not None:
-                    fcntl.flock(handle, fcntl.LOCK_UN)
+                    _unlock(handle)
                     handle.close()
                 held[org_id] = depth
