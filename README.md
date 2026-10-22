@@ -1,62 +1,66 @@
 <p align="center">
-  <img src="docs/terminal.svg" alt="The daoharness terminal: one sentence becomes a workflow, with its steps, who acts and how often" width="860">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg">
+    <img alt="DaoHarness Skeleton" src="docs/wordmark-light.svg" width="460">
+  </picture>
+</p>
+
+<h3 align="center">One sentence in. A workflow your people sign off.</h3>
+
+<p align="center">
+  <a href="https://github.com/DaoBrewAI/DaoHarness/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/DaoBrewAI/DaoHarness/actions/workflows/tests.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-4B4BE8?style=flat-square"></a>
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-14120F?style=flat-square">
+  <img alt="Model: bring your own" src="https://img.shields.io/badge/model-bring%20your%20own-FFC91F?style=flat-square">
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-4B4BE8"></a>
-  <a href="https://github.com/DaoBrewAI/DaoHarness/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/DaoBrewAI/DaoHarness/actions/workflows/tests.yml/badge.svg"></a>
-  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-14120F">
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#same-skeleton-different-trades">Examples</a> ·
+  <a href="#skeleton-and-hosted">Skeleton and hosted</a> ·
+  <a href="#faq">FAQ</a>
 </p>
 
-# DaoHarness
+<p align="center">
+  <img src="docs/hero.svg" width="824" alt="A recorded terminal session: one sentence becomes a seven-step workflow, the model asks a person about the one answer it is unsure of, the CTO approves the reply and the result is saved">
+</p>
+<p align="center"><sub>A recording of the real terminal and engine, on a stand-in model so it runs anywhere. Slowed down so you can read it.</sub></p>
 
-**An open-source, plug-and-play harness for AI-native services: bring your own model and run it from your
-terminal.**
+**Claude Code is a harness for a programmer. DaoHarness is a harness for a service firm.**
 
-> Claude Code is a harness for a programmer. DaoHarness is a harness for a service firm.
+Every AI service business rebuilds the same thing for every client:
+- map the process;
+- decide which steps a model can do and which a person must sign;
+- run it, and keep the record.
 
-Describe a job you repeat in one sentence. DaoHarness turns it into a workflow: the steps, the person who signs off,
-and what it delivers. Then it runs the workflow on your input, one item at a time when the input holds many, stops
-for a person wherever a decision is unsure or a message would leave the building, and saves the result to a folder.
+DaoHarness Skeleton turns that into one sentence. Describe a job you repeat and it drafts the workflow: the steps, who acts, where a person signs off, and what gets delivered. It then runs the workflow on your input, one item at a time. It stops for a person when a decision is unsure or a message would leave the building, and it saves the result.
 
-## Try it in 60 seconds, no API key
+## Quickstart
+
+The demo needs no API key:
 
 ```bash
 pip install git+https://github.com/DaoBrewAI/DaoHarness
-daoharness-demo            # a security questionnaire, from one sentence to an approved answer set
-daoharness-demo --list     # three example workflows
+daoharness-demo              # one sentence → workflow → run → the CTO approves → result
+daoharness-demo --list       # three example workflows
 ```
 
-The demo runs the real engine on a stand-in model, so you see validation, per-item steps, decisions, a person's
-approval and the delivered package without calling any provider. No Python 3.11 at hand?
-`uvx --from git+https://github.com/DaoBrewAI/DaoHarness daoharness-demo` fetches one for you.
+No Python 3.11? Run `uvx --from git+https://github.com/DaoBrewAI/DaoHarness daoharness-demo` and uvx fetches one for you.
 
-## Run your own job on your own model
+**Your job, your model.** Any OpenAI-compatible endpoint works: OpenAI, Gemini, Groq, OpenRouter, Together, Ollama, LM Studio and vLLM.
 
 ```bash
 pip install "daoharness[server] @ git+https://github.com/DaoBrewAI/DaoHarness"
-
-export DAOHARNESS_PROVIDER=openai        # or gemini, groq, openrouter, together, ollama
-export DAOHARNESS_MODEL=<a model your provider serves>
-export OPENAI_API_KEY=...                # your provider's usual key variable
-
-daoharness serve     # the local server: 127.0.0.1 only, your model, files in ~/.daoharness
-daoharness new       # in another terminal: describe a job you repeat, in one sentence
-daoharness run       # paste the input, then approve, reject or edit each item
+export DAOHARNESS_PROVIDER=openai DAOHARNESS_MODEL=<model> OPENAI_API_KEY=<key>
+daoharness serve             # the local server: 127.0.0.1 only, files in ~/.daoharness
+daoharness new --run "Every Monday, check new vendor contracts against our policy; legal approves."
 ```
 
-<p align="center">
-  <img src="docs/run.svg" alt="A run in the terminal: each question is answered, the model is unsure about one and asks you, the CTO approves the reply, and the result is saved" width="760">
-</p>
+Run `daoharness new` in a second terminal.
 
-`daoharness approvals`, `watch`, `ls`, `show` and `status` do what they say. Each finished run leaves `result.md` and
-`package.json` in `~/.daoharness/deliveries/<workflow>/<run>/`. Both pictures are the real terminal and engine,
-running on a stand-in model.
-
-DaoHarness does not ship, host or pay for a model. One model does everything (building the workflow, running each
-step and making decisions) through the included adapter, `daoharness.adapters.OpenAICompatibleModel`, which uses
-only the standard library and sends each request straight to your provider with your key. It asks for strict
-structured output and falls back to JSON mode where an endpoint does not support it.
+<details>
+<summary><b>All settings and commands</b></summary>
 
 | Setting | What it does |
 |---|---|
@@ -66,102 +70,143 @@ structured output and falls back to JSON mode where an endpoint does not support
 | `DAOHARNESS_API_KEY` | Your key, if the provider's usual variable (`OPENAI_API_KEY`, `GEMINI_API_KEY`, ...) is not set |
 | `DAOHARNESS_MAX_TOKENS` | Optional cap on each reply |
 
-## What it does
+| Command | What it does |
+|---|---|
+| `daoharness new` | Build a workflow from one sentence; add `--run` to run it straight away |
+| `daoharness run` | Run a saved workflow |
+| `daoharness approvals` | List what is waiting for you |
+| `watch`, `ls`, `show`, `status` | Do what they say |
 
-- **One sentence in, a workflow out.** The model writes a workflow spec from your description. The engine validates
-  it and gives the model one retry with the errors. You see the steps before you save.
-- **Twelve step types.** Collect, extract fields, match a checklist, score, route, generate questions, draft a
-  message, summarize, deliver, split into items, a generic model step, and a person's approval.
-- **One step, many items.** Split one input into items (applicants, questions, invoices), run steps once per item,
-  then approve the whole batch with a verdict per item: approve, reject or edit. Edits flow to the steps after.
-- **Unsure goes to a person.** Checklists, scores and routes are decisions: the model answers with a confidence, and
-  anything below the threshold (0.75 unless you set another) waits for you.
-- **Drafts only.** A message to anyone outside is a draft, and a person approves it. Identifiers are masked for the
-  approver, and nothing is ever sent.
-- **Runs that survive.** Every call is cached before it is merged, so a stopped run continues where it left off
-  without repeating work. Every action is applied once, even when a command runs twice.
-- **Token usage, not guesses.** Each run reports its model calls and the tokens your provider measured.
+Each finished run leaves `result.md` and `package.json` in `~/.daoharness/deliveries/<workflow>/<run>/`.
+</details>
 
-## What it does not do
+## How it works
 
-This is v0, and some things are missing on purpose:
+```mermaid
+flowchart LR
+    S["<b>One sentence</b><br/>a job you repeat"] --> W["<b>Workflow</b><br/>steps · roles · sign-offs"]
+    W --> V{"Valid?"}
+    V -- "errors go back<br/>to the model once" --> W
+    V -- "yes" --> R["<b>Run</b><br/>one item at a time"]
+    R --> D{"Sure<br/>enough?"}
+    D -- "no" --> P["A person decides"]
+    D -- "yes" --> A
+    P --> A["<b>A person approves</b><br/>approve · edit · reject"]
+    A --> O["<b>Delivered</b><br/>result.md · package.json"]
+    classDef plain fill:#F7F2E7,stroke:#14120F,stroke-width:2.5px,color:#14120F
+    classDef work fill:#E4E4FF,stroke:#14120F,stroke-width:2.5px,color:#14120F
+    classDef human fill:#FFF0C2,stroke:#14120F,stroke-width:2.5px,color:#14120F
+    classDef done fill:#DDF3E4,stroke:#14120F,stroke-width:2.5px,color:#14120F
+    class S,V,D plain
+    class W,R work
+    class P,A human
+    class O done
+```
 
-- **No web research.** A step that needs the web, or any source the engine cannot reach, stops the run there as a
-  gap you can see before you run it.
-- **No connectors.** Nothing reads your email, drive or chat, and nothing is sent anywhere.
-- **Quotes are shown, not verified.** Steps quote the input they rely on; a positive claim without a quote is flagged
-  for the approver, but the quote is not checked against the text.
-- **One person, one machine, one model.** There are no roles, no routing between models and no web UI: the terminal
-  is the interface.
-- **Generic prompts.** The instructions that build workflows are short and general, so drafts are rougher than they
-  could be. Read the steps, and edit or rebuild before you save.
+- **One sentence in, a workflow out.** The model writes a workflow spec. The engine validates it and gives the model one retry with the errors. You see every step before you save.
+- **Twelve step types:** collect, extract fields, match a checklist, score, route, split into items, generate questions, draft a message, summarize, a generic model step, a person's approval and deliver.
+- **One step, many items.** Split one input into items (questions, applicants, invoices) and run steps once per item. Then approve the whole batch with a verdict per item: approve, edit or reject. Edits flow to the steps after.
+- **Unsure goes to a person.** Checklists, scores and routes are decisions with a confidence. Below the threshold (0.75 unless you set another), they wait for you.
+- **Drafts only.** A message to anyone outside is a draft that a person approves. Nothing is ever sent.
+- **Runs that survive.** Every model call is cached before it is used. A stopped run picks up where it left off without repeating work.
+- **Measured, not guessed.** Each run reports its model calls and the tokens your provider measured.
 
-DaoHarness hosted is invite-only. The same terminal works with it after `daoharness login --url ...`.
+## Same skeleton, different trades
 
-## Plug in your own pieces
+| Example | The one sentence, shortened | Who signs off |
+|---|---|---|
+| `security-questionnaire` | Answer each question from our security docs; send the unsure ones to the CTO | CTO |
+| `accounting-intake` | Check a new client's documents against the intake checklist; ask for what is missing | Partner |
+| `recruiting-screening` | Score each resume against the role; draft the reply | Hiring manager |
 
-The engine talks to the outside world through small ports, and depends only on the Python standard library and
-`jsonschema`.
+These are three different businesses with the same skeleton: gather, extract, check, decide, ask, draft, **a person approves**, deliver. Try one with `daoharness-demo accounting-intake`.
+
+## Skeleton and hosted
+
+|  | **Skeleton** · this repo, Apache-2.0 | **DaoHarness hosted** · invite-only |
+|---|---|---|
+| Model | Yours, with your key | Ours: you only sign in |
+| Interface | Terminal | Terminal or web |
+| People | One person, one machine | Teams, roles and an approval inbox |
+| Sources | What you paste in | Also web research and connectors |
+| Industry packs | Not included | Private, built with the experts who earned them |
+
+The same terminal works with both. To use hosted, run `daoharness login --url <your DaoHarness address>`; it needs no model key.
+
+## FAQ
+
+<details>
+<summary><b>How is this different from LangGraph, CrewAI or other agent frameworks?</b></summary>
+
+Those give you building blocks to program agents. DaoHarness starts from the business: you describe a job you repeat and get a checked workflow, with no graph code to write. That workflow has:
+- explicit sign-offs;
+- per-item runs;
+- decisions that ask a person when unsure;
+- a delivered package.
+
+Every piece is swappable: your model, your decider, your store.
+</details>
+
+<details>
+<summary><b>Does it send anything anywhere?</b></summary>
+
+Only your prompts, to your model provider. Messages are drafts for a person to approve, and nothing is sent. The local server listens on 127.0.0.1. It keeps everything in files under `~/.daoharness` that only you can read.
+</details>
+
+<details>
+<summary><b>Which models work?</b></summary>
+
+Any OpenAI-compatible chat endpoint. The adapter asks for strict structured output. Where an endpoint does not support it, it falls back to JSON mode, then to plain JSON. Small local models draft rougher workflows, so read the steps before you save.
+</details>
+
+<details>
+<summary><b>What is missing in v0?</b></summary>
+
+- **Web research and connectors:** none yet. A step that needs a source the engine cannot reach is shown as a gap before you run.
+- **Quotes:** shown to the approver, but not checked against the text.
+- **People:** one person on one machine, with no roles or web UI.
+- **Prompts:** the ones that build workflows are short and generic, so drafts are rough. Edit or rebuild before you save.
+</details>
+
+<details>
+<summary><b>Can I plug in my own model, decider or storage?</b></summary>
+
+The engine talks to the outside world through small ports. It depends only on the Python standard library and `jsonschema`.
 
 | Port | What you provide | Included |
 |---|---|---|
-| `ModelPort` | Any model: one `generate(...)` call that returns JSON matching a schema | Any OpenAI-compatible endpoint; a stand-in model |
-| `DecisionPort` | Optional: your own decider for checklists, scores and routes, instead of the model | None |
+| `ModelPort` | One `generate(...)` call that returns JSON matching a schema | Any OpenAI-compatible endpoint; a stand-in model |
+| `DecisionPort` | Optional: your own decider for checklists, scores and routes | — |
 | `WorkflowStore` | Where workflows, runs and approvals live | Files with locks |
 | `MembershipPort`, `Notifier` | Who may approve, and how they hear about it | One person; no notifications |
 
 ```python
-from datetime import datetime, timezone
-
 from daoharness.adapters import OpenAICompatibleModel
 from daoharness.file_store import FileWorkflowStore
 from daoharness.service import WorkflowService
 
-service = WorkflowService(
-    store=FileWorkflowStore("./workflows"),
-    model=OpenAICompatibleModel.from_env(),
-    membership=MyMembership(),    # resolve(org_id, approver_role) -> who approves
-    notifier=MyNotifier(),        # approval_requested(org_id, approval)
-    clock=lambda: datetime.now(timezone.utc).isoformat(),
-    submit=lambda job: job(),     # runs advance inline; pass a thread or a queue instead
-)
+service = WorkflowService(store=FileWorkflowStore("./workflows"), model=OpenAICompatibleModel.from_env(),
+                          membership=MyMembership(), notifier=MyNotifier(), clock=my_clock, submit=lambda job: job())
 draft = service.create("my-org", "build-1", "Every Monday, check new vendor contracts against our policy...")
 ```
 
 `daoharness/testing.py` has stand-in versions of every port.
+</details>
 
-## Safety
-
-- The local server listens on 127.0.0.1 only, refuses requests another site's page starts, and keeps everything in
-  files under `~/.daoharness` that only you can read.
-- Models read untrusted input and can be led astray by it (prompt injection). That is why nothing here sends
-  anything: messages are drafts, and a person approves them.
-- DaoHarness does not decide that you comply with any rule. The person who approves is responsible for what goes
-  out.
-
-## Three examples
-
-| Example | The one sentence, shortened |
-|---|---|
-| `security-questionnaire` | Answer each question of a prospect's security questionnaire from our docs; the CTO approves |
-| `accounting-intake` | Check a new client's documents against the intake checklist; a partner approves the email |
-| `recruiting-screening` | Score a resume against the role; the hiring manager approves the email |
-
-The last two are different businesses with the same skeleton: gather, extract, check, decide, ask, draft,
-**a person approves**, summarize, deliver.
-
-## Development
+## Contributing
 
 ```bash
-pip install -e ".[test]"
-pytest -q
+pip install -e ".[test]" && pytest -q
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Adapters for other model APIs and example workflows from real use (no
-client data) are the most useful contributions right now.
+The most useful contributions right now:
+- adapters for other model APIs;
+- example workflows from real use, with no client data.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 ## License
 
 [Apache-2.0](LICENSE). Copyright DaoBrew AI; see [NOTICE](NOTICE).
 
-**Agents propose. A person approves.**
+<p align="center"><br><b>Agents propose. A person approves.</b><br><sub>Built by <a href="https://github.com/DaoBrewAI">DaoBrew AI</a></sub></p>

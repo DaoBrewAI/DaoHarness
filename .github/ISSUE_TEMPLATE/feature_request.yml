@@ -1,0 +1,17 @@
+name: Idea or request
+description: A step type, an adapter, an example workflow or anything else
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: job
+    attributes:
+      label: The job you want to run
+      description: Describe it the way you would to DaoHarness, in a sentence or two.
+    validations:
+      required: true
+  - type: textarea
+    id: missing
+    attributes:
+      label: What is missing today
+    validations:
+      required: true
