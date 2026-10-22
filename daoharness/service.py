@@ -158,6 +158,9 @@ def capability_result(run: Mapping) -> dict:
     limitations.extend(f"Not met: {c['criterion']}" for c in criteria if not c["met"])
     limitations.extend(f"Excluded: {i.get('label', '')} ({i.get('reason') or 'excluded'})"
                        for i in run.get("items") or [] if i.get("status") == "excluded")
+    limitations.extend(f"Outside this workflow: {gap.get('detail')}" for step in spec["steps"]
+                       if step.get("primitive") == "deliver_package"
+                       for gap in (run.get("blocked_steps") or {}).get(step.get("id")) or [])
     tables = [{"title": "Step record", "columns": ["Step", "Role", "State", "Checks"],
                "rows": [[str(s["step_id"]), str(s.get("role", "")), str(s.get("state", "")),
                          _checks_text(s.get("checks") or [])] for s in run["steps"]]}]

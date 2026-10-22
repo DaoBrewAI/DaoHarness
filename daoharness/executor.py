@@ -989,6 +989,8 @@ class WorkflowExecutor:
         """A step that needs a source or capability this engine does not have stops the run here
         (needs_capability): a source it declares, or a gap the compiler declared for the step."""
         declared = (run or {}).get("blocked_steps", {}).get(step.id) or []
+        if step.primitive == "deliver_package":   # it packages what the run made: a gap there is work after delivery,
+            declared = []                         # listed in the result's limitations instead
         missing = [s for s in step.required_sources if s not in self.connected_sources]
         missing += [g["detail"] for g in declared if g.get("detail") not in self.connected_sources]
         if not missing:

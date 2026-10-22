@@ -11,6 +11,7 @@
 - Windows: the file store locks with `msvcrt` where there is no `fcntl`.
 - Gemini and Vertex AI work: their endpoints start in JSON mode, any 400 or a stalled strict request steps down a mode, and the schema is in the prompt too.
 - A stalled step is asked again after 90 seconds, not 300; `DAOHARNESS_TIMEOUT` sets the wait.
+- A gap the model declares on the delivery step (signing, sending) no longer stops the run; the result lists it.
 
 ## 0.1.0 · 2026-10-22
 

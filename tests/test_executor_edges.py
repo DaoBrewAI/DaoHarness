@@ -1,5 +1,6 @@
 import copy
 
+from daoharness.service import capability_result
 from daoharness.spec import WorkflowSpec
 from workflow_fakes import FakeModel, executor_for
 
@@ -69,6 +70,18 @@ def test_a_gap_declared_for_a_step_stops_the_run_there(tmp_path):
     run = ex.advance("o", RUN)
     assert run["code"] == "needs_capability" and _rec(run, "summary")["error"]["detail"] == "a calendar"
     assert _rec(run, "extract")["state"] == "completed"
+
+
+def test_a_gap_declared_for_the_delivery_does_not_stop_it(tmp_path):
+    # Models list what happens after delivery (signing, sending) as a gap on the last step
+    model = FakeModel()
+    ex, _, _ = executor_for(tmp_path, model)
+    ex.start(org_id="o", run_id=RUN, instance_id="i", version=1, spec=WorkflowSpec.from_dict(AUTO),
+             input_payload={"source_kind": "supplied_input", "content": {"documents": DOCS}},
+             blocked_steps={"package": [{"kind": "needs_capability", "detail": "e-signature of the lease"}]})
+    run = ex.advance("o", RUN)
+    assert run["state"] == "completed" and _rec(run, "package")["state"] == "completed"
+    assert "Outside this workflow: e-signature of the lease" in capability_result(run)["limitations"]
 
 
 def test_model_call_cap_pauses_needs_attention(tmp_path):
