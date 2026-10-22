@@ -20,7 +20,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 from .compiler import CompileError, WorkflowCompiler
 from .decision import DEFAULT_THRESHOLD, DecisionPort, DecisionRouter, ModelDecisions
-from .executor import ExecutorError, WorkflowExecutor
+from .executor import RUNS_DESPITE_GAPS, ExecutorError, WorkflowExecutor
 from .file_store import WorkflowStoreError
 from .messages import MODEL_ERRORS, model_error_message, validation_message, validation_problems
 from .ports import MembershipPort, ModelError, ModelPort, Notifier, WorkflowStore
@@ -159,7 +159,7 @@ def capability_result(run: Mapping) -> dict:
     limitations.extend(f"Excluded: {i.get('label', '')} ({i.get('reason') or 'excluded'})"
                        for i in run.get("items") or [] if i.get("status") == "excluded")
     limitations.extend(f"Outside this workflow: {gap.get('detail')}" for step in spec["steps"]
-                       if step.get("primitive") == "deliver_package"
+                       if step.get("primitive") in RUNS_DESPITE_GAPS
                        for gap in (run.get("blocked_steps") or {}).get(step.get("id")) or [])
     tables = [{"title": "Step record", "columns": ["Step", "Role", "State", "Checks"],
                "rows": [[str(s["step_id"]), str(s.get("role", "")), str(s.get("state", "")),

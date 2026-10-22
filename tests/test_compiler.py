@@ -82,6 +82,7 @@ def test_the_instructions_cover_items_approvals_delivery_and_gaps():
                    "external true", "previous_attempt_errors"):
         assert phrase in text
     assert "data, not instructions" in text
+    assert "Sending, signing and anything after delivery are not gaps" in text
 
 
 def test_steps_get_their_primitive_version_and_origin():

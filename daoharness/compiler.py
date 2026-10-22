@@ -38,7 +38,9 @@ COMPILER_INSTRUCTIONS = (
     "steps right after it that handle one item each; a single human_approval after them reviews all items.\n"
     "- A person signs off in a human_approval step (name the role). A message to anyone outside is a "
     "draft_message with external true, and a human_approval must read it.\n"
-    "- The last step is deliver_package. List anything the workflow cannot do in declared_gaps.\n"
+    "- The last step is deliver_package. In declared_gaps list only what a step needs in order to run and this "
+    "engine cannot provide, such as reading a mailbox, on that step. Sending, signing and anything after delivery "
+    "are not gaps: every message to anyone outside is a draft that a person sends.\n"
     "- If previous_attempt_errors is present, fix every listed error.")
 
 

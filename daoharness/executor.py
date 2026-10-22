@@ -79,6 +79,11 @@ def _blank_item(item: Mapping, attempt: int = 0, *, auto_retried: bool = False) 
     return record
 
 
+# Steps this engine always runs itself: models declare sending, signing or filing as a gap on them, which must not
+# stop the person from approving or the package from being delivered.
+RUNS_DESPITE_GAPS = frozenset({"collect_inputs", "human_approval", "deliver_package"})
+
+
 def _attention(code: str, **extra: Any) -> dict:
     return {"record": {"state": "needs_attention", "error": {"code": code, **extra}}}
 
@@ -989,7 +994,7 @@ class WorkflowExecutor:
         """A step that needs a source or capability this engine does not have stops the run here
         (needs_capability): a source it declares, or a gap the compiler declared for the step."""
         declared = (run or {}).get("blocked_steps", {}).get(step.id) or []
-        if step.primitive == "deliver_package":   # it packages what the run made: a gap there is work after delivery,
+        if step.primitive in RUNS_DESPITE_GAPS:   # a gap declared on one of these is work outside the workflow,
             declared = []                         # listed in the result's limitations instead
         missing = [s for s in step.required_sources if s not in self.connected_sources]
         missing += [g["detail"] for g in declared if g.get("detail") not in self.connected_sources]

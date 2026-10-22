@@ -84,6 +84,21 @@ def test_a_gap_declared_for_the_delivery_does_not_stop_it(tmp_path):
     assert "Outside this workflow: e-signature of the lease" in capability_result(run)["limitations"]
 
 
+def test_a_gap_declared_on_the_approval_still_lets_the_person_decide(tmp_path):
+    spec = _spec(_step("collect", "collect_inputs", ["input:documents"]),
+                 _step("extract", "extract_fields", ["step:collect"], FIELDS),
+                 _step("approve", "human_approval", ["step:extract"],
+                       approval={"approver_role": "Property Manager", "what_is_approved": "The screening"}),
+                 _step("package", "deliver_package", ["step:approve"]))
+    model = FakeModel()
+    ex, _, _ = executor_for(tmp_path, model)
+    ex.start(org_id="o", run_id=RUN, instance_id="i", version=1, spec=WorkflowSpec.from_dict(spec),
+             input_payload={"source_kind": "supplied_input", "content": {"documents": DOCS}},
+             blocked_steps={"approve": [{"kind": "needs_capability", "detail": "sending the lease to the tenant"}]})
+    run = ex.advance("o", RUN)
+    assert run["state"] == "waiting_approval" and _rec(run, "approve")["state"] == "waiting_approval"
+
+
 def test_model_call_cap_pauses_needs_attention(tmp_path):
     _, _, model, run = _run(tmp_path, AUTO, cap=1)
     assert _rec(run, "extract")["state"] == "completed"
