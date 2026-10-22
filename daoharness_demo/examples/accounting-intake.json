@@ -1,0 +1,222 @@
+{
+    "id": "accounting-intake",
+    "title": "Accounting client intake",
+    "need": "Every time a new client signs with our firm we run the same intake. First we gather the documents they send and their business profile. Then we pull out the legal name, entity type and owner. Next we check the documents against our intake checklist and decide whether the packet is complete. After that we draft an email asking for anything missing, and the engagement partner approves it before it goes out. Finally we write an intake summary and file the client intake package.",
+    "spec": {
+        "domain": "Accounting client intake",
+        "purpose": "Turn a new client's documents into a checked intake file and an approved request for missing items.",
+        "input_requirements": [
+            {
+                "name": "documents",
+                "description": "Text of the documents the client sent",
+                "required": true
+            },
+            {
+                "name": "profile",
+                "description": "Short business profile of the client",
+                "required": true
+            }
+        ],
+        "deliverables": [
+            "Client intake file",
+            "Approved request for missing items"
+        ],
+        "completion_criteria": [
+            "Every checklist item is marked present, missing or unclear",
+            "The request for missing items is approved"
+        ],
+        "steps": [
+            {
+                "id": "collect",
+                "role": "Intake coordinator",
+                "instructions": "Gather the client documents and profile.",
+                "primitive": "collect_inputs",
+                "config": {},
+                "inputs": [
+                    "input:documents",
+                    "input:profile"
+                ],
+                "approval": null
+            },
+            {
+                "id": "extract",
+                "role": "Intake specialist",
+                "instructions": "Extract the core entity facts.",
+                "primitive": "extract_fields",
+                "config": {
+                    "fields": [
+                        {
+                            "name": "legal_name",
+                            "description": "Registered legal name of the business",
+                            "required": true
+                        },
+                        {
+                            "name": "entity_type",
+                            "description": "Entity type such as LLC or corporation",
+                            "required": true
+                        },
+                        {
+                            "name": "owner_name",
+                            "description": "Name of the owner",
+                            "required": true
+                        }
+                    ]
+                },
+                "inputs": [
+                    "step:collect"
+                ],
+                "approval": null
+            },
+            {
+                "id": "assess",
+                "role": "Intake specialist",
+                "instructions": "Check the documents against the intake checklist.",
+                "primitive": "checklist_match",
+                "config": {
+                    "items": [
+                        {
+                            "id": "prior_year_return",
+                            "label": "Prior-year return",
+                            "description": "Last year's filed tax return"
+                        },
+                        {
+                            "id": "bank_statements",
+                            "label": "Bank statements",
+                            "description": "Recent bank statements for all accounts"
+                        },
+                        {
+                            "id": "photo_id",
+                            "label": "Photo ID",
+                            "description": "Government photo ID of the owner"
+                        },
+                        {
+                            "id": "engagement_letter",
+                            "label": "Engagement letter",
+                            "description": "Signed engagement letter"
+                        },
+                        {
+                            "id": "payroll_reports",
+                            "label": "Payroll reports",
+                            "description": "Quarterly payroll reports"
+                        },
+                        {
+                            "id": "prior_year_financials",
+                            "label": "Prior-year financials",
+                            "description": "Last year's financial statements"
+                        }
+                    ]
+                },
+                "inputs": [
+                    "input:documents"
+                ],
+                "approval": null
+            },
+            {
+                "id": "route",
+                "role": "Intake specialist",
+                "instructions": "Decide whether the intake packet is complete.",
+                "primitive": "classify_route",
+                "config": {
+                    "categories": [
+                        {
+                            "id": "complete_packet",
+                            "label": "Complete packet",
+                            "description": "Every checklist item is present"
+                        },
+                        {
+                            "id": "missing_items",
+                            "label": "Missing items",
+                            "description": "One or more checklist items are missing or unclear"
+                        }
+                    ]
+                },
+                "inputs": [
+                    "step:assess"
+                ],
+                "approval": null
+            },
+            {
+                "id": "questions",
+                "role": "Intake specialist",
+                "instructions": "Ask what is needed to close the gaps.",
+                "primitive": "generate_questions",
+                "config": {
+                    "max_questions": 5,
+                    "focus": "Missing or unclear intake documents"
+                },
+                "inputs": [
+                    "step:assess",
+                    "step:extract"
+                ],
+                "approval": null
+            },
+            {
+                "id": "outreach",
+                "role": "Client service associate",
+                "instructions": "Draft an email to the client requesting missing items.",
+                "primitive": "draft_message",
+                "config": {
+                    "channel": "email",
+                    "audience": "client",
+                    "external": true
+                },
+                "inputs": [
+                    "step:assess",
+                    "step:questions"
+                ],
+                "approval": null
+            },
+            {
+                "id": "approval",
+                "role": "Engagement partner",
+                "instructions": "Review the outbound email before it is sent.",
+                "primitive": "human_approval",
+                "config": {},
+                "inputs": [
+                    "step:outreach"
+                ],
+                "approval": {
+                    "approver_role": "Engagement partner",
+                    "what_is_approved": "Outbound email"
+                }
+            },
+            {
+                "id": "summary",
+                "role": "Intake specialist",
+                "instructions": "Summarize the intake status.",
+                "primitive": "summarize_report",
+                "config": {
+                    "sections": [
+                        "Entity facts",
+                        "Checklist status",
+                        "Open questions"
+                    ]
+                },
+                "inputs": [
+                    "step:extract",
+                    "step:assess",
+                    "step:questions"
+                ],
+                "approval": null
+            },
+            {
+                "id": "package",
+                "role": "Intake coordinator",
+                "instructions": "Assemble the intake file.",
+                "primitive": "deliver_package",
+                "config": {
+                    "title": "Client intake file"
+                },
+                "inputs": [
+                    "step:summary",
+                    "step:approval"
+                ],
+                "approval": null
+            }
+        ]
+    },
+    "input": {
+        "documents": "Prior-year return for Northwind LLC attached. Bank statements for January through March. Photo ID of the owner Dana Reyes. Employer number 12-3456789.",
+        "profile": "Northwind LLC, single-member company owned by Dana Reyes."
+    }
+}

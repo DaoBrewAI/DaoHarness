@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="824" height="470" viewBox="0 0 824 470" role="img" aria-label="daoharness new  ·  stand-in model">
+<title>daoharness new  ·  stand-in model</title>
+<rect width="100%" height="100%" rx="10" fill="#0D1117"/>
+<circle cx="22" cy="20" r="6" fill="#FF5F57"/><circle cx="42" cy="20" r="6" fill="#FEBC2E"/><circle cx="62" cy="20" r="6" fill="#28C840"/>
+<text x="412" y="24" fill="#8B949E" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" text-anchor="middle">daoharness new  ·  stand-in model</text>
+<g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="13.0" xml:space="preserve" style="white-space:pre">
+<text x="22" y="52.0" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3" font-weight="700">You type</tspan><tspan fill="#E6EDF3">                                                                                            </tspan></text>
+<text x="22" y="70.8" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3">  “When a prospect sends a security questionnaire, answer each question from our security docs, send</tspan></text>
+<text x="22" y="89.7" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3">  the ones we are unsure about to our CTO, and have the CTO approve the reply.”                     </tspan></text>
+<text x="22" y="127.4" xml:space="preserve" style="white-space:pre"><tspan fill="#00af5f">✓ </tspan><tspan fill="#E6EDF3">Built in 0:00 · stand-in-model                                                                    </tspan></text>
+<text x="22" y="165.1" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3" font-weight="700">Workflow  Security questionnaire answers</tspan><tspan fill="#E6EDF3">   7 steps · 86% automatic · runs once per question         </tspan></text>
+<text x="22" y="183.9" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3">  Answer every question in a prospect&#x27;s security questionnaire from our docs; the CTO approves.     </tspan></text>
+<text x="22" y="221.6" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3">   1  Sales engineer  Collect the questionnaire and our security do…  </tspan><tspan fill="#5f5fff">automatic</tspan><tspan fill="#E6EDF3">                     </tspan></text>
+<text x="22" y="240.5" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3">   2  Sales engineer  Split the questionnaire into single questions.  </tspan><tspan fill="#5f5fff">automatic</tspan><tspan fill="#E6EDF3">                     </tspan></text>
+<text x="22" y="259.3" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3">   3  Sales engineer  Answer this question using only our security…   </tspan><tspan fill="#5f5fff">automatic · per question</tspan><tspan fill="#E6EDF3">      </tspan></text>
+<text x="22" y="278.2" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3">   4  Sales engineer  Decide whether the answer is backed by our do…  </tspan><tspan fill="#5f5fff">asks if unsure · per question</tspan><tspan fill="#E6EDF3"> </tspan></text>
+<text x="22" y="297.0" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3">   5  Sales engineer  Draft the completed questionnaire to send bac…  </tspan><tspan fill="#5f5fff">draft only</tspan><tspan fill="#E6EDF3">                    </tspan></text>
+<text x="22" y="315.9" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3">   6  CTO             The CTO approves the answers before they go b…  </tspan><tspan fill="#d7af00">you approve</tspan><tspan fill="#E6EDF3">                   </tspan></text>
+<text x="22" y="334.7" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3">   7  Sales engineer  Assemble the answered questionnaire.            </tspan><tspan fill="#5f5fff">automatic</tspan><tspan fill="#E6EDF3">                     </tspan></text>
+<text x="22" y="372.4" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3">Needs Questionnaire, Security docs                                                                  </tspan></text>
+<text x="22" y="391.3" xml:space="preserve" style="white-space:pre"><tspan fill="#E6EDF3">Delivers An answer per question with its source line; CTO-approved answers                          </tspan></text>
+<text x="22" y="429.0" xml:space="preserve" style="white-space:pre"><tspan fill="#00af5f">✓ </tspan><tspan fill="#E6EDF3">Saved as version 1                                                                                </tspan></text>
+</g></svg>

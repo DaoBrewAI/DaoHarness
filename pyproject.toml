@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "daoharness"
+version = "0.1.0"
+description = "An open-source, plug-and-play harness for AI-native services: bring your own model and run it from your terminal."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.11"
+authors = [{ name = "DaoBrew AI" }]
+dependencies = ["jsonschema>=4.23,<5"]
+keywords = ["ai-agents", "agent-harness", "workflows", "human-in-the-loop", "llm", "ai-native-services"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries",
+]
+
+[project.optional-dependencies]
+server = ["fastapi>=0.110", "uvicorn>=0.29"]
+test = ["pytest>=8", "fastapi>=0.110", "uvicorn>=0.29"]
+
+[project.scripts]
+daoharness = "daoharness_cli.main:main"
+daoharness-demo = "daoharness_demo.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/DaoBrewAI/DaoHarness"
+Issues = "https://github.com/DaoBrewAI/DaoHarness/issues"
+
+[tool.setuptools]
+packages = ["daoharness", "daoharness.adapters", "daoharness_cli", "daoharness_demo", "daoharness_server"]
+
+[tool.setuptools.package-data]
+daoharness_demo = ["examples/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]

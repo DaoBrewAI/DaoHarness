@@ -1,0 +1,177 @@
+{
+    "id": "security-questionnaire",
+    "title": "Security questionnaire answers",
+    "need": "When an enterprise prospect sends a security questionnaire, answer each question from our security docs with the line we relied on, send the ones we are unsure about to our CTO, and have the CTO approve every answer before it goes back.",
+    "spec": {
+        "domain": "Security questionnaire answers",
+        "purpose": "Answer every question in a prospect's security questionnaire from our docs; the CTO approves.",
+        "input_requirements": [
+            {
+                "name": "questionnaire",
+                "description": "The questions, one per line",
+                "required": true
+            },
+            {
+                "name": "security_docs",
+                "description": "Our security overview and policies",
+                "required": true
+            }
+        ],
+        "deliverables": [
+            "An answer per question with its source line",
+            "CTO-approved answers"
+        ],
+        "completion_criteria": [
+            "Every question has an answer or is marked for the CTO",
+            "The CTO approved the answers"
+        ],
+        "steps": [
+            {
+                "id": "collect",
+                "role": "Sales engineer",
+                "instructions": "Collect the questionnaire and our security docs.",
+                "primitive": "collect_inputs",
+                "config": {},
+                "inputs": [
+                    "input:questionnaire",
+                    "input:security_docs"
+                ],
+                "approval": null,
+                "for_each": null,
+                "required_sources": []
+            },
+            {
+                "id": "split",
+                "role": "Sales engineer",
+                "instructions": "Split the questionnaire into single questions.",
+                "primitive": "split_items",
+                "config": {
+                    "item_noun": "question",
+                    "max_items": 50,
+                    "separator": "\n"
+                },
+                "inputs": [
+                    "input:questionnaire"
+                ],
+                "approval": null,
+                "for_each": null,
+                "required_sources": []
+            },
+            {
+                "id": "answer",
+                "role": "Sales engineer",
+                "instructions": "Answer this question using only our security docs and quote the line it relies on.",
+                "primitive": "extract_fields",
+                "config": {
+                    "fields": [
+                        {
+                            "name": "answer",
+                            "description": "The answer, in one or two sentences",
+                            "required": true
+                        },
+                        {
+                            "name": "source_line",
+                            "description": "The line of our docs the answer relies on",
+                            "required": true
+                        }
+                    ]
+                },
+                "inputs": [
+                    "step:split",
+                    "input:security_docs"
+                ],
+                "approval": null,
+                "for_each": "split",
+                "required_sources": []
+            },
+            {
+                "id": "route",
+                "role": "Sales engineer",
+                "instructions": "Decide whether the answer is backed by our docs.",
+                "primitive": "classify_route",
+                "config": {
+                    "categories": [
+                        {
+                            "id": "backed",
+                            "label": "Backed by our docs",
+                            "description": "The quoted line fully supports the answer"
+                        },
+                        {
+                            "id": "needs_cto",
+                            "label": "Needs the CTO",
+                            "description": "The docs do not settle it, or it is a commitment"
+                        },
+                        {
+                            "id": "not_applicable",
+                            "label": "Not applicable",
+                            "description": "The question does not apply to us"
+                        }
+                    ]
+                },
+                "inputs": [
+                    "step:answer"
+                ],
+                "approval": null,
+                "for_each": "split",
+                "required_sources": []
+            },
+            {
+                "id": "reply",
+                "role": "Sales engineer",
+                "instructions": "Draft the completed questionnaire to send back.",
+                "primitive": "draft_message",
+                "config": {
+                    "channel": "document",
+                    "audience": "the prospect's security team",
+                    "external": true,
+                    "rules": [
+                        "Every answer cites a source line or says it needs follow-up"
+                    ]
+                },
+                "inputs": [
+                    "step:answer",
+                    "step:route"
+                ],
+                "approval": null,
+                "for_each": null,
+                "required_sources": []
+            },
+            {
+                "id": "approval",
+                "role": "CTO",
+                "instructions": "The CTO approves the answers before they go back.",
+                "primitive": "human_approval",
+                "config": {},
+                "inputs": [
+                    "step:reply"
+                ],
+                "approval": {
+                    "approver_role": "CTO",
+                    "what_is_approved": "Questionnaire answers"
+                },
+                "for_each": null,
+                "required_sources": []
+            },
+            {
+                "id": "package",
+                "role": "Sales engineer",
+                "instructions": "Assemble the answered questionnaire.",
+                "primitive": "deliver_package",
+                "config": {
+                    "title": "Answered security questionnaire"
+                },
+                "inputs": [
+                    "step:route",
+                    "step:approval"
+                ],
+                "approval": null,
+                "for_each": null,
+                "required_sources": []
+            }
+        ]
+    },
+    "input": {
+        "questionnaire": "Do you encrypt data at rest?\nDo you have SOC 2 Type II?\nWhere is customer data stored?",
+        "security_docs": "All customer data is encrypted at rest with AES-256. Data is stored in us-west1. SOC 2 Type II audit is in progress."
+    }
+}

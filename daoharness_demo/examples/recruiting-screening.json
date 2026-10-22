@@ -1,0 +1,223 @@
+{
+    "id": "recruiting-screening",
+    "title": "Recruiting candidate screening",
+    "need": "Whenever a new applicant comes in for an open role we follow our screening process. First we gather the resume and the role brief. Then we extract the candidate's name, years of experience and current title. Next we score the resume against the role criteria and decide to advance, hold or decline. After that we draft an email to the candidate, and the hiring manager approves it. Finally we write a screening summary and assemble the screening packet.",
+    "spec": {
+        "domain": "Recruiting candidate screening",
+        "purpose": "Turn a candidate's resume into a scored screening packet and an approved candidate email.",
+        "input_requirements": [
+            {
+                "name": "resume",
+                "description": "Text of the candidate's resume",
+                "required": true
+            },
+            {
+                "name": "role_brief",
+                "description": "Short brief of the open role",
+                "required": true
+            }
+        ],
+        "deliverables": [
+            "Screening packet",
+            "Approved candidate email"
+        ],
+        "completion_criteria": [
+            "Every criterion is scored with evidence",
+            "The candidate email is approved"
+        ],
+        "steps": [
+            {
+                "id": "collect",
+                "role": "Recruiting coordinator",
+                "instructions": "Gather the resume and role brief.",
+                "primitive": "collect_inputs",
+                "config": {},
+                "inputs": [
+                    "input:resume",
+                    "input:role_brief"
+                ],
+                "approval": null
+            },
+            {
+                "id": "extract",
+                "role": "Sourcer",
+                "instructions": "Extract the candidate's core facts.",
+                "primitive": "extract_fields",
+                "config": {
+                    "fields": [
+                        {
+                            "name": "full_name",
+                            "description": "Candidate's full name",
+                            "required": true
+                        },
+                        {
+                            "name": "years_experience",
+                            "description": "Total years of experience",
+                            "required": true
+                        },
+                        {
+                            "name": "current_title",
+                            "description": "Most recent job title",
+                            "required": true
+                        }
+                    ]
+                },
+                "inputs": [
+                    "step:collect"
+                ],
+                "approval": null
+            },
+            {
+                "id": "assess",
+                "role": "Recruiter",
+                "instructions": "Score the resume against the role criteria.",
+                "primitive": "screen_score",
+                "config": {
+                    "scale_max": 5,
+                    "criteria": [
+                        {
+                            "id": "python",
+                            "label": "Python",
+                            "description": "Production Python experience",
+                            "weight": 3
+                        },
+                        {
+                            "id": "sql",
+                            "label": "SQL",
+                            "description": "Strong SQL and data modeling",
+                            "weight": 3
+                        },
+                        {
+                            "id": "leadership",
+                            "label": "Leadership",
+                            "description": "Has led an engineering team",
+                            "weight": 2
+                        },
+                        {
+                            "id": "pipelines",
+                            "label": "Pipelines",
+                            "description": "Built and operated data pipelines",
+                            "weight": 2
+                        }
+                    ]
+                },
+                "inputs": [
+                    "input:resume",
+                    "input:role_brief"
+                ],
+                "approval": null
+            },
+            {
+                "id": "route",
+                "role": "Recruiter",
+                "instructions": "Decide the next step for the candidate.",
+                "primitive": "classify_route",
+                "config": {
+                    "categories": [
+                        {
+                            "id": "advance",
+                            "label": "Advance",
+                            "description": "Strong match; move to interviews"
+                        },
+                        {
+                            "id": "hold",
+                            "label": "Hold",
+                            "description": "Partial match; keep warm"
+                        },
+                        {
+                            "id": "decline",
+                            "label": "Decline",
+                            "description": "Not a match for this role"
+                        }
+                    ]
+                },
+                "inputs": [
+                    "step:assess"
+                ],
+                "approval": null
+            },
+            {
+                "id": "questions",
+                "role": "Recruiter",
+                "instructions": "Ask what is needed to close the gaps.",
+                "primitive": "generate_questions",
+                "config": {
+                    "max_questions": 5,
+                    "focus": "Gaps between the resume and the role criteria"
+                },
+                "inputs": [
+                    "step:assess",
+                    "step:extract"
+                ],
+                "approval": null
+            },
+            {
+                "id": "outreach",
+                "role": "Recruiter",
+                "instructions": "Draft an email to the candidate about next steps.",
+                "primitive": "draft_message",
+                "config": {
+                    "channel": "email",
+                    "audience": "candidate",
+                    "external": true
+                },
+                "inputs": [
+                    "step:assess",
+                    "step:questions"
+                ],
+                "approval": null
+            },
+            {
+                "id": "approval",
+                "role": "Hiring manager",
+                "instructions": "Review the outbound email before it is sent.",
+                "primitive": "human_approval",
+                "config": {},
+                "inputs": [
+                    "step:outreach"
+                ],
+                "approval": {
+                    "approver_role": "Hiring manager",
+                    "what_is_approved": "Outbound email"
+                }
+            },
+            {
+                "id": "summary",
+                "role": "Recruiter",
+                "instructions": "Summarize the screening result.",
+                "primitive": "summarize_report",
+                "config": {
+                    "sections": [
+                        "Candidate facts",
+                        "Criteria scores",
+                        "Open questions"
+                    ]
+                },
+                "inputs": [
+                    "step:extract",
+                    "step:assess",
+                    "step:questions"
+                ],
+                "approval": null
+            },
+            {
+                "id": "package",
+                "role": "Recruiting coordinator",
+                "instructions": "Assemble the screening packet.",
+                "primitive": "deliver_package",
+                "config": {
+                    "title": "Screening packet"
+                },
+                "inputs": [
+                    "step:summary",
+                    "step:approval"
+                ],
+                "approval": null
+            }
+        ]
+    },
+    "input": {
+        "resume": "Priya Shah, senior data engineer with 7 years of experience building pipelines in Python and SQL. Led a team of four.",
+        "role_brief": "Senior data engineer, remote, Python and SQL, team lead experience preferred."
+    }
+}
