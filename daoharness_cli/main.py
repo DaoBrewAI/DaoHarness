@@ -59,6 +59,15 @@ SETTLED = {"complete", "rejected", "failed", "needs_attention", "needs_access", 
            "needs_revision", "needs_clarification"}
 RUNGS = {"model": "model", "strong_model": "stronger model", "human": "you"}   # any other rung: a decision engine
 SOURCE_LABELS = {"verified": "quote found on the page", "grounded": "Google Search", "unchecked": "page not checked"}
+# The checks a step passed or failed, in the web app's words
+CHECK_LABELS = {
+    "schema": "Output format", "citations": "Quotes found in inputs", "required_fields": "Required fields",
+    "mask_sensitive": "Sensitive numbers masked", "draft_only": "Draft only, not sent", "coverage": "Every item answered",
+    "status_rules": "Status rules", "score_range": "Scores in range", "category": "Valid category",
+    "question_limit": "Question limit", "source_steps": "Cited steps", "criteria_coverage": "Every criterion assessed",
+    "rule_compliance": "Draft rules", "found_fields": "Found fields quoted", "human_approval": "Human decision",
+    "sub_workflow": "Sub-workflow", "web_sources": "Web sources checked", "item_boundaries": "Each item found in the input",
+    "item_count": "Number of items", "duplicate_items": "Repeated items merged"}
 SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
@@ -1013,6 +1022,7 @@ class RunPrinter:
                 quote = next(src for src in sources if src.get("status") == "verified")
                 self.ui.p("        " + s.dim(clip(f"↳ “{quote.get('quote')}” ({SOURCE_LABELS['verified']})", width() - 10)))
             show_chips(self.ui, search_chips(record), "        ")
+        show_checks(self.ui, record.get("checks"))
 
     def problem(self, record: dict) -> None:
         s, n, state = self.ui.s, self.number(record["step_id"]), record.get("state")
@@ -1309,11 +1319,15 @@ def finish(ui: UI, client: Client, iid: str, action: str, view: dict):
         show_result(ui, view.get("result"))
         if view.get("delivered_to"):
             ui.p(s.dim(f"  Saved to {tilde(view['delivered_to'])}"))
-        show_usage(ui, view.get("usage"), run.get("metrics") or {})
+        show_usage(ui, view.get("usage") or (view.get("cost") or {}).get("model"), run.get("metrics") or {},
+                   (view.get("execution_receipt") or {}).get("model"))
+        show_cost(ui, view.get("cost"))
         return None
     if status == "rejected":
         ui.p(s.yellow("Stopped at the approval: nothing goes out."))
-        show_usage(ui, view.get("usage"), run.get("metrics") or {})
+        show_usage(ui, view.get("usage") or (view.get("cost") or {}).get("model"), run.get("metrics") or {},
+                   (view.get("execution_receipt") or {}).get("model"))
+        show_cost(ui, view.get("cost"))
         return None
     reasons = {"needs_access": "It needs access to: " + ", ".join(view.get("missing") or run.get("missing_sources") or []),
                "interrupted": view.get("message") or "The run stopped before it finished.",
@@ -1348,11 +1362,59 @@ def show_result(ui: UI, result) -> None:
         ui.p("  " + mark + f"{met} of {len(criteria)} done-checks met")
 
 
-def show_usage(ui: UI, usage, metrics: dict) -> None:
-    """What a run used: model calls and, when the server reports them, tokens."""
+def show_checks(ui: UI, checks, indent: str = "        ") -> None:
+    """A step's checks: the passed ones on one dim line, each failed one on its own line with what failed."""
+    s, checks = ui.s, [c for c in checks or [] if isinstance(c, dict)]
+    passed = [CHECK_LABELS.get(c.get("id"), str(c.get("id"))) for c in checks if c.get("passed")]
+    if passed:
+        ui.p(indent + s.dim(clip("✓ " + " · ✓ ".join(passed), width() - len(indent))))
+    for check in checks:
+        if not check.get("passed"):
+            label = CHECK_LABELS.get(check.get("id"), str(check.get("id")))
+            ui.p(indent + s.yellow(clip(f"✗ {label}" + (f" — {check['detail']}" if check.get("detail") else ""),
+                                        width() - len(indent))))
+
+
+def usd(value: float) -> str:
+    """"$7.80" under $10, whole dollars from there ("$1,803"), as the web app writes money."""
+    amount = round(abs(value), 2)
+    sign = "-" if value < 0 else ""
+    return f"{sign}${amount:.2f}" if amount < 10 else f"{sign}${round(amount):,}"
+
+
+def times(ratio) -> str | None:
+    """"22×" or "1.9×", turned around below 1 ("2×" for 0.5): the word next to it says which way."""
+    if not isinstance(ratio, (int, float)) or isinstance(ratio, bool) or not ratio > 0 or ratio == float("inf"):
+        return None
+    value = ratio if ratio >= 1 else 1 / ratio
+    return (str(round(value)) if value >= 10 else f"{value:.1f}".removesuffix(".0")) + "×"
+
+
+def show_cost(ui: UI, cost) -> None:
+    """The run's estimate, as the web app's run line has it: "EST. 17× cheaper · 9× faster", then "this run $7.80
+    ($0.30 model + 6 min yours) · by people $142 (1.9 h)". Only hosted sends a cost."""
+    if not isinstance(cost, dict) or not isinstance(cost.get("model"), dict):
+        return
+    s, model = ui.s, cost["model"]
+    hourly, minutes, hours = cost.get("hourly_cost") or 0, cost.get("your_minutes") or 0, cost.get("people_hours") or 0
+    people, workflow = hours * hourly, (model.get("usd") or 0) + minutes / 60 * hourly
+    ratio, faster = (people / workflow if workflow > 0 else None), cost.get("faster")
+    multiples = [f"{times(r)} {word if r >= 1 else other}" for r, word, other in
+                 ((ratio, "cheaper", "more"), (faster, "faster", "slower")) if times(r)]
+    money = (f"this run {usd(workflow)} ({usd(model.get('usd') or 0)} model"
+             + (" (from billing)" if model.get("source") == "billed" else "")
+             + f" + {round(minutes)} min yours) · by people {usd(people)} ({f'{hours:.1f}'.removesuffix('.0')} h)")
+    ui.p()
+    ui.p(s.bold("Receipt  ") + s.yellow("EST. ") + s.bold(" · ".join(multiples) if multiples else ""))
+    ui.p(s.dim("         " + money) + (s.dim(" · example run, not in the monthly totals")
+                                       if cost.get("counted") is False else ""))
+
+
+def show_usage(ui: UI, usage, metrics: dict, model: str | None = None) -> None:
+    """What a run used: model calls, the model of its last model step, and, when the server reports them, tokens."""
     s, usage = ui.s, usage if isinstance(usage, dict) else {}
     calls = (usage.get("calls") or 0) + (usage.get("decision_calls") or 0) or metrics.get("model_calls") or 0
-    parts = [f"{calls} model call{'s' if calls != 1 else ''}"] if calls else []
+    parts = [f"{calls} model call{'s' if calls != 1 else ''}" + (f" on {model}" if model else "")] if calls else []
     if usage.get("input_tokens") is not None:
         parts.append(f"{usage['input_tokens']:,} tokens in · {usage.get('output_tokens') or 0:,} out"
                      + (" (estimated)" if usage.get("estimated") else ""))

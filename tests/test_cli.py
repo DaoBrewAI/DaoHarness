@@ -180,6 +180,32 @@ def test_usage_shows_calls_tokens_and_time(capsys):
     assert "1 model call" in capsys.readouterr().out
 
 
+def test_hosted_usage_names_the_model_and_the_receipt_reads_like_the_web_app(capsys):
+    ui = cli.UI(SimpleNamespace(no_color=True, yes=False, full=False))
+    cost = {"model": {"calls": 4, "decision_calls": 1, "input_tokens": 9000, "output_tokens": 1200, "usd": 0.04,
+                      "estimated": False, "source": "billed"},
+            "hourly_cost": 75, "your_minutes": 3, "people_hours": 1.9, "faster": 9.2, "counted": False}
+    cli.show_usage(ui, cost["model"], {"model_calls": 4}, "gemini-3.7-flash")
+    cli.show_cost(ui, cost)
+    out = capsys.readouterr().out
+    assert "5 model calls on gemini-3.7-flash · 9,000 tokens in · 1,200 out" in out
+    assert "Receipt  EST. 38× cheaper · 9.2× faster" in out
+    assert ("this run $3.79 ($0.04 model (from billing) + 3 min yours) · by people $142 (1.9 h)"
+            " · example run, not in the monthly totals") in out
+    cli.show_cost(ui, None)      # the local server sends no cost
+    assert capsys.readouterr().out == ""
+    assert (cli.usd(7.8), cli.usd(1803.4), cli.times(0.5), cli.times(22.4), cli.times(None)) == (
+        "$7.80", "$1,803", "2×", "22×", None)
+
+
+def test_a_step_shows_its_checks_passed_on_one_line_and_each_failure_with_its_detail(capsys):
+    ui = cli.UI(SimpleNamespace(no_color=True, yes=False, full=False))
+    cli.show_checks(ui, [{"id": "schema", "passed": True}, {"id": "citations", "passed": True},
+                         {"id": "rule_compliance", "passed": False, "detail": "no pet addendum"}])
+    assert capsys.readouterr().out.splitlines() == ["        ✓ Output format · ✓ Quotes found in inputs",
+                                                     "        ✗ Draft rules — no pet addendum"]
+
+
 def test_error_messages_name_the_next_step():
     assert cli.is_local("http://127.0.0.1:8767") and cli.is_local("localhost:8767")
     assert not cli.is_local("https://hosted.example")
