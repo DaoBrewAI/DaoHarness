@@ -104,7 +104,9 @@ def test_a_build_that_stays_invalid_is_422_and_the_failure_is_kept_for_the_actio
     model = FakeModel(compile_outputs=[bad, copy.deepcopy(bad)])
     svc = service_for(tmp_path, model)
     err = _expect(422, "compile_invalid", lambda: svc.create(ORG, "c1", ACCOUNTING["description"]))
-    assert "missing_deliverable" in err.message
+    assert err.message == ("The workflow the model wrote did not pass validation, even on a second try: the last "
+                           "step, 'summary', must be a deliver_package step. Try again, or describe the job in "
+                           "more detail.")
     _expect(422, "compile_invalid", lambda: svc.create(ORG, "c1", ACCOUNTING["description"]))
     assert model.count("compile") == 2 and svc.catalog(ORG)["creations"] == []
 
@@ -122,10 +124,49 @@ def test_a_build_the_engine_had_to_tidy_says_so_and_a_clean_one_does_not(tmp_pat
     assert "authoring_notes" not in clean
 
 
-def test_an_unavailable_model_is_503(tmp_path):
+def test_an_unavailable_model_is_503_and_the_message_says_what_to_do(tmp_path):
     svc = service_for(tmp_path, FakeModel(fail_operations={"compile"}))
-    err = _expect(503, "model_unavailable", lambda: svc.create(ORG, "c1", ACCOUNTING["description"]))
-    assert "provider_failed" in err.message
+    err = _expect(503, "provider_failed", lambda: svc.create(ORG, "c1", ACCOUNTING["description"]))
+    assert err.message == "The model provider had an error on its side. Try again in a minute."
+
+
+@pytest.mark.parametrize("code, detail, starts", [
+    ("provider_rejected", "HTTP 400",
+     "The model provider rejected the request (HTTP 400). Check that DAOHARNESS_MODEL"),
+    ("provider_auth", "", "The model provider did not accept your key."),
+    ("model_not_found", "", "The model provider does not know the model in DAOHARNESS_MODEL."),
+    ("out_of_credit", "", "The model provider says you are out of credit."),
+    ("provider_unreachable", "", "Could not reach the model provider. Check your internet connection"),
+    ("invalid_model_json", "extra data after the JSON object",
+     "The model's reply was not valid JSON (extra data after the JSON object). Try again;"),
+    ("reply_truncated", "", "The model's reply was cut off before it finished. Raise DAOHARNESS_MAX_TOKENS"),
+    ("a_code_from_another_adapter", "", "The model could not be used (a_code_from_another_adapter)."),
+])
+def test_every_model_failure_is_a_sentence_with_its_own_code(tmp_path, code, detail, starts):
+    def fail(_input):
+        raise ModelError(code, detail)
+
+    svc = service_for(tmp_path, FakeModel(compile_outputs=[fail]))
+    err = _expect(503, code, lambda: svc.create(ORG, "c1", ACCOUNTING["description"]))
+    assert err.message.startswith(starts) and "model_unavailable" not in err.message
+    _expect(503, code, lambda: svc.create(ORG, "c1", ACCOUNTING["description"]))   # the failure is kept per action
+
+
+def test_a_workflow_that_fails_validation_shows_the_first_problems_with_their_step_ids(tmp_path):
+    bad = _payload()
+    bad["spec"]["steps"][2]["inputs"] = ["step:nowhere", "input:nothing"]
+    bad["spec"]["steps"][4]["inputs"] = ["step:later"]
+    bad["spec"]["steps"][5]["inputs"] = ["step:later"]
+    svc = service_for(tmp_path, FakeModel(compile_outputs=[bad, copy.deepcopy(bad)]))
+    err = _expect(422, "compile_invalid", lambda: svc.create(ORG, "c1", ACCOUNTING["description"]))
+    assert err.message == (
+        "The workflow the model wrote did not pass validation, even on a second try: "
+        "step 'assess' reads step 'nowhere', which does not come before it; "
+        "step 'assess' reads an input called 'nothing' that the workflow does not list; "
+        "step 'questions' reads step 'later', which does not come before it (+1 more). "
+        "Try again, or describe the job in more detail.")
+
+
 
 
 def test_confirm_saves_the_draft_once(tmp_path):
@@ -315,6 +356,10 @@ def test_a_failed_step_can_be_retried(tmp_path):
 
     svc, model, iid, run = _waiting(tmp_path, model=FakeModel(step_overrides={"questions": flaky}))
     assert run["status"] == "failed" and run["code"] == "provider_failed"
+    sentence = "The model provider had an error on its side. Try again in a minute."
+    assert run["message"] == sentence
+    assert next(s for s in run["workflow_run"]["steps"] if s["step_id"] == "questions")["error"] == {
+        "code": "provider_failed", "message": sentence}
     assert run["workflow_run"]["retryable"] and run["workflow_run"]["next_action"] == "retry"
     run = svc.retry(ORG, iid, "r1")
     assert run["status"] == "waiting_approval" and run["workflow_run"]["metrics"]["human_interventions"] == 1

@@ -22,6 +22,7 @@ from .compiler import CompileError, WorkflowCompiler
 from .decision import DEFAULT_THRESHOLD, DecisionPort, DecisionRouter, ModelDecisions
 from .executor import ExecutorError, WorkflowExecutor
 from .file_store import WorkflowStoreError
+from .messages import MODEL_ERRORS, model_error_message, validation_message, validation_problems
 from .ports import MembershipPort, ModelError, ModelPort, Notifier, WorkflowStore
 from .primitives import builtin_catalog
 from .spec import WorkflowSpec, WorkflowSpecError, digest
@@ -51,25 +52,17 @@ def _bad_input(message: str) -> WorkflowServiceError:
     return WorkflowServiceError(400, "invalid_dynamic_input", message)
 
 
-def _errors_message(prefix: str, errors: Iterable[str], limit: int = 5) -> str:
-    errors = [str(e) for e in errors]
-    shown = "; ".join(e[:300] for e in errors[:limit])
-    more = f" (+{len(errors) - limit} more)" if len(errors) > limit else ""
-    return f"{prefix}: {shown}{more}" if shown else prefix
-
-
 def _convert(exc: BaseException) -> WorkflowServiceError | None:
     if isinstance(exc, WorkflowServiceError):
         return exc
     if isinstance(exc, ExecutorError):
         return WorkflowServiceError(exc.status, exc.code, exc.message)
     if isinstance(exc, CompileError):
-        return WorkflowServiceError(422, "compile_invalid",
-                                    _errors_message("The workflow could not be built", [*exc.hints, *exc.errors]))
+        return WorkflowServiceError(422, "compile_invalid", validation_message([*exc.hints, *exc.errors]))
     if isinstance(exc, WorkflowSpecError):
         return WorkflowServiceError(422, "compile_invalid", f"The workflow is not valid: {exc}"[:500])
-    if isinstance(exc, ModelError):
-        return WorkflowServiceError(503, "model_unavailable", f"The model is unavailable ({exc.code}). Try again.")
+    if isinstance(exc, ModelError):   # the code says which; the message says what to do about it
+        return WorkflowServiceError(503, exc.code, model_error_message(exc.code, exc.detail))
     if isinstance(exc, WorkflowStoreError):
         return _bad_input(f"Invalid identifier ({exc.code}).")
     return None
@@ -102,11 +95,19 @@ def _item_view(item: Mapping) -> dict:
     return {k: copy.deepcopy(v) for k, v in item.items() if k not in ("pending_outcomes", "review")}
 
 
+def _step_error(error: Any) -> Any:
+    """A step's error as the API shows it: one from the model gets the sentence for its code."""
+    error = copy.deepcopy(error)
+    if isinstance(error, dict) and not error.get("message") and error.get("code") in MODEL_ERRORS:
+        error["message"] = model_error_message(error["code"])
+    return error
+
+
 def _step_view(record: Mapping) -> dict:
     view = {"step_id": record["step_id"], "role": record.get("role", ""), "primitive": record.get("primitive", ""),
             "state": record.get("state"), "attempt": record.get("attempt", 0),
             "output": copy.deepcopy(record.get("output")), "checks": copy.deepcopy(list(record.get("checks") or [])),
-            "approval_id": record.get("approval_id"), "error": copy.deepcopy(record.get("error")),
+            "approval_id": record.get("approval_id"), "error": _step_error(record.get("error")),
             "decisions": copy.deepcopy(list(record.get("decisions") or [])),
             "flags": copy.deepcopy(list(record.get("flags") or [])),
             "started_at": record.get("started_at"), "finished_at": record.get("finished_at")}
@@ -420,6 +421,8 @@ class WorkflowService:
                                              for i in run["items"]]
         if run.get("code"):
             view["code"] = run["code"]
+            if run["code"] in MODEL_ERRORS:
+                view["message"] = model_error_message(run["code"])
         if state == "interrupted":
             view["message"] = "The run stopped before it finished. Continue it to pick up where it left off."
         if state == "completed":
@@ -541,7 +544,7 @@ class WorkflowService:
                 report = validate_spec(spec, self._ctx(org))
                 if report.errors:
                     raise WorkflowServiceError(422, "compile_invalid",
-                                               _errors_message("The workflow is no longer valid", report.errors))
+                                               f"The workflow is no longer valid: {validation_problems(report.errors)}")
                 gaps = list(dict.fromkeys((g["step_id"], g["kind"], g["detail"]) for g in [*report.gaps, *draft["gaps"]]))
                 rec["version"] = {"version": 1, "draft_id": draft_id, "spec": spec.to_dict(), "spec_digest": spec.digest(),
                                   "metrics": report.metrics,
@@ -567,7 +570,8 @@ class WorkflowService:
             raise WorkflowServiceError(409, "workflow_not_ready", "Save the workflow before running it.")
         _readiness, errors, blocked = self._readiness(org, rec)
         if errors:
-            raise WorkflowServiceError(409, "workflow_not_ready", f"The workflow cannot run: {', '.join(errors)}"[:500])
+            raise WorkflowServiceError(409, "workflow_not_ready",
+                                       f"The workflow cannot run: {validation_problems(errors)}")
         spec = WorkflowSpec.from_dict(rec["version"]["spec"])
         content = _check_content(spec, input["content"])
 

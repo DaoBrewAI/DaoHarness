@@ -63,9 +63,10 @@ class Stop(Exception):
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, code: str, message: str) -> None:
+    def __init__(self, status: int, code: str, message: str, reported: bool = False) -> None:
         super().__init__(message)
         self.status, self.code, self.message = status, code, message
+        self.reported = reported   # the server named the problem itself, so asking again would get the same answer
 
 
 # -- text -----------------------------------------------------------------------------------------------------------
@@ -252,7 +253,8 @@ def load(raw: bytes):
 def api_error(status: int, payload) -> ApiError:
     detail = payload.get("detail") if isinstance(payload, dict) else None
     if isinstance(detail, dict):
-        return ApiError(status, str(detail.get("code") or ""), str(detail.get("message") or detail.get("code") or status))
+        message = str(detail.get("message") or detail.get("code") or status)
+        return ApiError(status, str(detail.get("code") or ""), message, reported=bool(detail.get("code")))
     if isinstance(detail, list):  # request validation
         return ApiError(status, "invalid_request",
                         "; ".join(str(d.get("msg")) for d in detail if isinstance(d, dict)) or "Invalid request.")
@@ -295,7 +297,7 @@ class Client:
             try:
                 return self._send(method, path, body)
             except ApiError as err:
-                if err.status not in (0, 502, 503, 504) or attempt == 4:
+                if err.reported or err.status not in (0, 502, 503, 504) or attempt == 4:
                     raise
             self.pause(delay)
             delay = min(delay * 2, 8.0)
@@ -357,7 +359,7 @@ def explain(err: ApiError, host: str) -> str:
     if err.status == 0 and is_local(host):
         return "The local server is not running. Start it in another terminal: daoharness serve"
     if err.status == 0:
-        return f"Can't reach {host}: {err.message}"
+        return f"Can't reach {host} ({err.message}). Check your internet connection and the address, then try again."
     if err.status == 401 and is_local(host):
         return "The local server did not accept this session. Restart it: daoharness serve"
     if err.status == 401:
@@ -1215,8 +1217,12 @@ def review(ui: UI, client: Client, approval: dict) -> dict:
             ui.p(s.dim(line))
         ranked = sorted(item.get("candidates") or [], key=lambda c: -(c.get("confidence") or 0))
         for candidate in ranked:
+            who = RUNGS.get(candidate.get("rung"), "decision engine")
+            if candidate.get("choice") is None:
+                ui.p("      " + s.dim(f"{who} gave no usable answer"))
+                continue
             sure = f" ({round(candidate['confidence'] * 100)}% sure)" if isinstance(candidate.get("confidence"), (int, float)) else ""
-            ui.p("      " + s.dim(f"{RUNGS.get(candidate.get('rung'), 'decision engine')} said “{candidate.get('choice')}”{sure}"))
+            ui.p("      " + s.dim(f"{who} said “{candidate.get('choice')}”{sure}"))
         suggested = next((c.get("choice") for c in ranked if c.get("choice") in options), options[0] if options else None)
         for n, option in enumerate(options, 1):
             ui.p(f"      {n}. {option}" + (s.dim("   ← suggested") if option == suggested else ""))

@@ -183,6 +183,76 @@ def test_usage_shows_calls_tokens_and_time(capsys):
 def test_error_messages_name_the_next_step():
     assert cli.is_local("http://127.0.0.1:8767") and cli.is_local("localhost:8767")
     assert not cli.is_local("https://hosted.example")
-    assert "daoharness serve" in cli.explain(cli.ApiError(0, "network", "refused"), "127.0.0.1:8767")
-    assert "Can't reach" in cli.explain(cli.ApiError(0, "network", "refused"), "hosted.example")
+    assert cli.explain(cli.ApiError(0, "network", "refused"), "127.0.0.1:8767") == (
+        "The local server is not running. Start it in another terminal: daoharness serve")
+    assert cli.explain(cli.ApiError(0, "network", "name not known"), "hosted.example") == (
+        "Can't reach hosted.example (name not known). Check your internet connection and the address, then try "
+        "again.")
     assert "daoharness login" in cli.explain(cli.ApiError(401, "WEB_SESSION_REQUIRED", "x"), "hosted.example")
+
+
+def test_a_server_that_names_its_error_is_not_asked_again(monkeypatch):
+    pauses, sent = [], []
+    client = cli.Client("http://127.0.0.1:1", "s", pause=pauses.append)
+
+    def refuse(method, path, body, *rest):
+        sent.append(path)
+        raise cli.ApiError(503, "provider_auth", "The model provider did not accept your key.", reported=True)
+
+    monkeypatch.setattr(client, "_send", refuse)
+    with pytest.raises(cli.ApiError) as raised:
+        client.get("/x")
+    assert raised.value.code == "provider_auth" and sent == ["/x"] and pauses == []
+
+
+def test_a_gateway_that_said_nothing_useful_is_asked_again(monkeypatch):
+    pauses, sent = [], []
+    client = cli.Client("http://127.0.0.1:1", "s", pause=pauses.append)
+
+    def busy(method, path, body, *rest):
+        sent.append(path)
+        raise cli.ApiError(503, "", "HTTP 503")
+
+    monkeypatch.setattr(client, "_send", busy)
+    with pytest.raises(cli.ApiError):
+        client.get("/x")
+    assert len(sent) == 5 and pauses == [1.0, 2.0, 4.0, 8.0]
+
+
+def test_only_the_servers_own_error_format_counts_as_naming_an_error():
+    named = cli.api_error(503, {"detail": {"code": "provider_failed", "message": "m"}})
+    assert named.reported and (named.code, named.message) == ("provider_failed", "m")
+    for payload in (None, {}, {"detail": "Service Unavailable"}, {"detail": [{"msg": "x"}]}):
+        assert not cli.api_error(503, payload).reported
+
+
+def test_a_model_failure_reaches_the_terminal_as_a_sentence_and_at_once(local, capsys):
+    local.model.fail_operations.add("compile")
+    started = time.monotonic()
+    assert local.run("new", "Screen each applicant") == 1
+    err = capsys.readouterr().err
+    assert err.strip().endswith("The model provider had an error on its side. Try again in a minute. (provider_failed)")
+    assert "unavailable" not in err and time.monotonic() - started < 5
+
+
+def test_a_workflow_that_fails_validation_reaches_the_terminal_with_its_step_ids(local, capsys):
+    bad = as_model_payload(recruiting_fan_out_spec())
+    bad["spec"]["steps"][2]["inputs"] = ["step:nowhere"]
+    local.model.compile_outputs[:] = [bad, json.loads(json.dumps(bad))]
+    assert local.run("new", "Screen each applicant") == 1
+    err = capsys.readouterr().err
+    assert "did not pass validation, even on a second try: step 'extract' reads step 'nowhere'" in err
+    assert err.strip().endswith("(compile_invalid)")
+
+
+def test_a_decision_the_model_could_not_answer_says_so_instead_of_none(capsys):
+    ui = cli.UI(SimpleNamespace(no_color=True, yes=True, full=False))
+    posted = []
+    client = SimpleNamespace(post=lambda path, body: (200, posted.append(body) or {}))
+    item = {"id": "docs", "question": "Is it there?", "options": ["present", "missing"],
+            "candidates": [{"rung": "model", "choice": None, "confidence": None},
+                           {"rung": "strong_model", "choice": "missing", "confidence": 0.6}]}
+    cli.review(ui, client, {"approval_id": "a", "content_digest": "d", "items": [item]})
+    out = capsys.readouterr().out
+    assert "model gave no usable answer" in out and "stronger model said “missing” (60% sure)" in out
+    assert "None" not in out and posted[0]["choices"] == {"docs": "missing"}

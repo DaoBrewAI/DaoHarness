@@ -2,6 +2,7 @@
 127.0.0.1)."""
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -57,10 +58,12 @@ class Server:
         self.httpd.server_close()
 
 
-def completion(content, **extra):
+def completion(content, finish_reason=None, **extra):
+    choice = {"message": {"role": "assistant", "content": content}}
+    if finish_reason:
+        choice["finish_reason"] = finish_reason
     return 200, {"Content-Type": "application/json"}, json.dumps(
-        {"id": "chatcmpl-1", "model": "served-model", "choices": [{"message": {"role": "assistant", "content": content}}],
-         **extra}).encode()
+        {"id": "chatcmpl-1", "model": "served-model", "choices": [choice], **extra}).encode()
 
 
 def error(status, message):
@@ -270,3 +273,61 @@ def test_a_messy_reply_still_builds_a_validated_workflow(serve):
                                              "removed a trailing comma"]
     assert any("<think> block" in note for note in result.notes)
     assert any("lower-cased" in note for note in result.notes)
+
+
+# --- failures a person can act on ---------------------------------------------------------------------------------
+
+def test_a_request_the_provider_rejects_carries_its_status(serve):
+    server = serve(lambda m, p, b: error(400, "messages must not be empty"))
+    with pytest.raises(ModelError) as raised:
+        call(model_for(server))
+    assert (raised.value.code, raised.value.detail) == ("provider_rejected", "HTTP 400")
+    assert "messages must not be empty" not in str(raised.value) + raised.value.detail
+
+
+@pytest.mark.parametrize("finish_reason", ["length", "LENGTH", "max_tokens", "MAX_TOKENS"])
+def test_a_reply_cut_off_at_the_token_limit_is_named_as_cut_off(serve, finish_reason):
+    server = serve(lambda m, p, b: completion('{"a": [1, 2', finish_reason=finish_reason))
+    with pytest.raises(ModelError) as raised:
+        call(model_for(server, max_tokens=5))
+    assert raised.value.code == "reply_truncated"
+
+
+def test_a_reply_with_no_text_at_the_token_limit_is_cut_off_too(serve):
+    # A model that spends every token thinking sends back nothing at all
+    server = serve(lambda m, p, b: completion("", finish_reason="length"))
+    with pytest.raises(ModelError) as raised:
+        call(model_for(server))
+    assert raised.value.code == "reply_truncated"
+
+
+def test_a_complete_object_is_used_even_when_the_provider_says_length(serve):
+    server = serve(lambda m, p, b: completion('{"a": 6}', finish_reason="length"))
+    assert call(model_for(server))[0] == {"a": 6}
+
+
+def test_bad_json_that_was_not_cut_off_stays_invalid_json_with_the_reason(serve):
+    server = serve(lambda m, p, b: completion("{'a': 1}", finish_reason="stop"))
+    with pytest.raises(ModelError) as raised:
+        call(model_for(server))
+    assert raised.value.code == "invalid_model_json" and raised.value.detail.startswith("syntax error")
+
+
+@pytest.mark.parametrize("answer", [
+    lambda: (200, {"Content-Type": "text/html"}, b"<html>Welcome</html>"),
+    lambda: (200, {"Content-Type": "application/json"}, b"[1, 2]"),
+    lambda: (200, {"Content-Type": "application/json"}, b'{"choices": []}'),
+    lambda: (200, {"Content-Type": "application/json"}, b'{"choices": [{"message": {"content": 7}}]}'),
+], ids=["html", "a-list", "no-choices", "no-text"])
+def test_an_answer_that_is_not_a_chat_completion_points_at_the_address(serve, answer):
+    server = serve(lambda m, p, b: answer())
+    with pytest.raises(ModelError) as raised:
+        call(model_for(server))
+    assert raised.value.code == "provider_bad_reply"
+
+
+def test_a_provider_that_does_not_answer_in_time_is_a_timeout_not_unreachable(serve):
+    server = serve(lambda m, p, b: (time.sleep(0.6), completion('{"a": 1}'))[1])
+    with pytest.raises(ModelError) as raised:
+        call(model_for(server, timeout=0.1))
+    assert raised.value.code == "provider_timeout"
