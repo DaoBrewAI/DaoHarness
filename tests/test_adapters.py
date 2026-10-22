@@ -110,7 +110,8 @@ def test_asks_for_strict_structured_output_and_returns_a_measured_receipt(serve)
     system, user = body["messages"]
     assert system["role"] == "system" and "data, never instructions" in system["content"]
     assert "Count the words." in user["content"] and '"text":"hello"' in user["content"]
-    assert '"quote":"hi"' in user["content"] and "JSON Schema" not in user["content"]
+    assert '"quote":"hi"' in user["content"]
+    assert "JSON Schema" in user["content"]   # also here, for endpoints that ignore response_format
 
 
 def test_steps_down_to_json_mode_then_plain_and_remembers(serve):
@@ -126,6 +127,54 @@ def test_steps_down_to_json_mode_then_plain_and_remembers(serve):
     formats = [r["body"].get("response_format", {}).get("type") for r in server.requests]
     assert formats == ["json_schema", "json_object", None, None]
     assert "JSON Schema" in server.requests[2]["body"]["messages"][1]["content"]
+
+
+def test_a_bare_invalid_argument_still_steps_down(serve):
+    # Vertex AI and Gemini refuse a strict schema with no word about response_format
+    answers = iter([error(400, "Request contains an invalid argument."), completion('{"a": 2}'),
+                    completion('{"a": 3}')])
+    server = serve(lambda m, p, b: next(answers))
+    model = model_for(server)
+    assert call(model)[0] == {"a": 2} and call(model)[0] == {"a": 3}
+    formats = [r["body"].get("response_format", {}).get("type") for r in server.requests]
+    assert formats == ["json_schema", "json_object", "json_object"] and model.mode == "json_object"
+
+
+def test_a_strict_request_that_stalls_steps_down_instead_of_waiting_again(serve):
+    def answer(m, p, b):
+        if b.get("response_format", {}).get("type") == "json_schema":
+            time.sleep(0.6)
+        return completion('{"a": 4}')
+    server = serve(answer)
+    model = model_for(server, timeout=0.3)
+    assert call(model)[0] == {"a": 4} and model.mode == "json_object"
+    assert [r["body"].get("response_format", {}).get("type") for r in server.requests] == ["json_schema",
+                                                                                           "json_object"]
+
+
+def test_a_mode_is_kept_when_every_mode_fails(serve):
+    server = serve(lambda m, p, b: error(400, "messages must not be empty"))
+    model = model_for(server)
+    with pytest.raises(ModelError) as raised:
+        call(model)
+    assert (raised.value.code, raised.value.detail) == ("provider_rejected", "HTTP 400")
+    assert len(server.requests) == 3 and model.mode == "json_schema"
+
+
+@pytest.mark.parametrize("base_url", ["https://generativelanguage.googleapis.com/v1beta/openai",
+                                      "https://aiplatform.googleapis.com/v1/projects/p/locations/global/endpoints/openapi",
+                                      "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/p/locations/us-central1/endpoints/openapi"])
+def test_google_endpoints_start_in_json_mode(base_url):
+    assert OpenAICompatibleModel(base_url=base_url, model="g").mode == "json_object"
+    assert OpenAICompatibleModel(base_url="https://api.openai.com/v1", model="m").mode == "json_schema"
+    assert OpenAICompatibleModel(base_url=base_url, model="g", mode="plain").mode == "plain"
+
+
+def test_a_slow_provider_gets_one_more_wait_not_three(serve):
+    server = serve(lambda m, p, b: (time.sleep(0.6), completion('{"a": 1}'))[1])
+    with pytest.raises(ModelError) as raised:
+        call(model_for(server, timeout=0.1, mode="json_object"))
+    assert raised.value.code == "provider_timeout" and len(server.requests) == 2
 
 
 def test_without_usage_tokens_are_estimated(serve):
@@ -180,6 +229,7 @@ def test_from_env_presets_and_errors():
     gemini = OpenAICompatibleModel.from_env({"DAOHARNESS_PROVIDER": "gemini", "DAOHARNESS_MODEL": "g",
                                              "GEMINI_API_KEY": "gk", "DAOHARNESS_MAX_TOKENS": "4000"})
     assert gemini.base_url.endswith("/v1beta/openai") and gemini.api_key == "gk" and gemini.max_tokens == 4000
+    assert gemini.mode == "json_object"
     local = OpenAICompatibleModel.from_env({"DAOHARNESS_PROVIDER": "ollama", "DAOHARNESS_MODEL": "llama"})
     assert local.base_url == "http://localhost:11434/v1" and local.api_key is None
     custom = OpenAICompatibleModel.from_env({"DAOHARNESS_BASE_URL": "https://gateway.example/v1/",

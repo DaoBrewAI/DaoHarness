@@ -9,6 +9,7 @@
 - Errors say what went wrong and what to do, not "model unavailable".
 - A local build shows a waiting line with the elapsed seconds and is waited for up to 15 minutes, not 60 seconds.
 - Windows: the file store locks with `msvcrt` where there is no `fcntl`.
+- Gemini and Vertex AI work: their endpoints start in JSON mode, any 400 or a stalled strict request steps down a mode, and the schema is in the prompt too.
 
 ## 0.1.0 · 2026-10-22
 

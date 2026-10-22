@@ -156,7 +156,7 @@ Only your prompts, to your model provider. Messages are drafts for a person to a
 <details>
 <summary><b>Which models work?</b></summary>
 
-Any OpenAI-compatible chat endpoint. The adapter asks for strict structured output. Where an endpoint does not support it, it falls back to JSON mode, then to plain JSON. Small local models draft rougher workflows, so read the steps before you save.
+Any OpenAI-compatible chat endpoint. The adapter asks for strict structured output (Gemini and Vertex AI start in JSON mode). Where an endpoint does not support it, it falls back to JSON mode, then to plain JSON. Small local models draft rougher workflows, so read the steps before you save.
 </details>
 
 <details>
