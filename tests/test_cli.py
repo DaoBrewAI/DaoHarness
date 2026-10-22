@@ -256,3 +256,202 @@ def test_a_decision_the_model_could_not_answer_says_so_instead_of_none(capsys):
     out = capsys.readouterr().out
     assert "model gave no usable answer" in out and "stronger model said “missing” (60% sure)" in out
     assert "None" not in out and posted[0]["choices"] == {"docs": "missing"}
+
+
+# --- a long local build ------------------------------------------------------------------------------------------
+
+class RecordingLive:
+    """Stands in for the status line: it keeps what was set and counts the clears."""
+
+    def __init__(self, tty=True):
+        self.tty, self.texts, self.cleared = tty, [], 0
+
+    def set(self, text):
+        self.texts.append(text)
+
+    def clear(self):
+        self.cleared += 1
+
+    def say(self, line=""):
+        print(line)
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+def _ui(tty=True):
+    ui = cli.UI(SimpleNamespace(no_color=True, yes=False, full=False))
+    ui.live = RecordingLive(tty)
+    return ui
+
+
+def test_the_waiting_line_counts_the_seconds_and_after_a_while_says_a_local_model_is_slow():
+    assert cli.waiting_text("Building the workflow", 0) == "Building the workflow · 0:00"
+    assert cli.waiting_text("Building the workflow", 19.9) == "Building the workflow · 0:19"
+    assert cli.waiting_text("Building the workflow", 75) == (
+        "Building the workflow · 1:15 · a local model can take a few minutes")
+
+
+def test_the_waiting_line_updates_while_the_call_is_open_and_goes_when_it_ends(monkeypatch):
+    clock, ui = Clock(), _ui()
+    monkeypatch.setattr(cli.time, "monotonic", clock)
+    with cli.waiting(ui, "Building the workflow"):
+        [line] = ui.live.texts
+        assert line() == "Building the workflow · 0:00"
+        clock.now += 42
+        assert line() == "Building the workflow · 0:42 · a local model can take a few minutes"
+        assert ui.live.cleared == 0
+    assert ui.live.cleared == 1
+
+
+def test_the_waiting_line_goes_when_the_call_fails_too():
+    ui = _ui()
+    with pytest.raises(RuntimeError):
+        with cli.waiting(ui, "Building the workflow"):
+            raise RuntimeError("boom")
+    assert ui.live.cleared == 1
+
+
+def test_without_a_terminal_the_wait_is_one_plain_line(capsys):
+    ui = _ui(tty=False)
+    with cli.waiting(ui, "Building the workflow"):
+        pass
+    assert ui.live.texts == [] and capsys.readouterr().out == "Building the workflow…\n"
+
+
+def test_hosted_builds_are_posted_as_before_with_no_waiting_line():
+    ui, posted = _ui(), []
+
+    class Hosted:
+        url = "https://hosted.example"
+
+        def post(self, path, body, **kw):
+            posted.append((path, body, kw))
+            return 202, {"status": "building"}
+
+    assert cli.start_build(ui, Hosted(), "/creations", {"need": "x"}, "Building the workflow") == (
+        202, {"status": "building"})
+    assert posted == [("/creations", {"need": "x"}, {})] and ui.live.texts == []
+
+
+@pytest.fixture
+def slow_server(local, monkeypatch):
+    """The real terminal and local server, but a creations call that takes `needs` seconds to answer, simulated: it
+    times out unless the terminal is willing to wait that long. No real waiting, and no pause between retries."""
+    calls = []
+    real_urlopen, real_connect = cli.urllib.request.urlopen, cli.connect
+
+    def urlopen(request, timeout=None, context=None):
+        if request.full_url.endswith("/creations"):
+            calls.append(timeout)
+            if timeout < local.needs:
+                raise TimeoutError("timed out")
+        return real_urlopen(request, timeout=timeout, context=context)
+
+    def connect(ui, args):
+        client = real_connect(ui, args)
+        client.pause = lambda seconds: None
+        return client
+
+    local.needs, local.calls = 100, calls
+    monkeypatch.setattr(cli.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(cli, "connect", connect)
+    return local
+
+
+def test_a_local_build_that_takes_minutes_is_waited_for(slow_server, capsys):
+    assert slow_server.run("new", "Screen each applicant", "--save") == 0
+    out = capsys.readouterr().out
+    assert "Building the workflow" in out and "Saved as version 1" in out
+    assert slow_server.calls == [cli.BUILD_LIMIT_SECONDS]
+
+
+def test_a_local_build_that_never_finishes_ends_with_a_clear_message_after_one_wait(slow_server, capsys):
+    slow_server.needs = cli.BUILD_LIMIT_SECONDS + 1
+    assert slow_server.run("new", "Screen each applicant") == 1
+    err = capsys.readouterr().err
+    assert err.strip() == (
+        "✗ The model is still working after 15 minutes, so the terminal stopped waiting. The local server keeps "
+        "going: look for the workflow in a few minutes with daoharness ls, before you ask again. If this keeps "
+        "happening, use a faster model.")
+    assert slow_server.calls == [cli.BUILD_LIMIT_SECONDS]
+
+
+def test_a_real_slow_server_is_waited_for_past_the_ordinary_timeout(local, capsys, monkeypatch):
+    generate = local.model.generate
+
+    def slow(**kw):
+        time.sleep(1.2)
+        return generate(**kw)
+
+    local.model.generate = slow
+    monkeypatch.setattr(cli, "REQUEST_TIMEOUT", 0.4)
+    monkeypatch.setattr(cli, "BUILD_LIMIT_SECONDS", 20)
+    started = time.monotonic()
+    assert local.run("new", "Screen each applicant", "--save") == 0
+    assert "Saved as version 1" in capsys.readouterr().out and time.monotonic() - started >= 1.2
+
+
+def test_a_real_slow_server_past_the_limit_is_given_up_on_once(local, capsys, monkeypatch):
+    generate, release, asked = local.model.generate, threading.Event(), []
+
+    def stuck(**kw):
+        asked.append(kw["operation"])
+        release.wait(20)     # a model that does not answer until the test lets go of it
+        return generate(**kw)
+
+    local.model.generate = stuck
+    monkeypatch.setattr(cli, "REQUEST_TIMEOUT", 0.2)
+    monkeypatch.setattr(cli, "BUILD_LIMIT_SECONDS", 0.6)
+    try:
+        started = time.monotonic()
+        assert local.run("new", "Screen each applicant") == 1
+        assert "still working after" in capsys.readouterr().err and time.monotonic() - started < 10
+        assert asked == ["compile"]      # asked once, and not again after the terminal gave up
+    finally:
+        release.set()
+
+
+def test_a_timeout_is_retried_at_the_ordinary_limit_but_not_after_a_long_wait(monkeypatch):
+    pauses, sent = [], []
+    client = cli.Client("http://127.0.0.1:1", "s", pause=pauses.append)
+
+    def too_slow(method, path, body, timeout):
+        sent.append(timeout)
+        raise cli.ApiError(0, "timeout", "timed out")
+
+    monkeypatch.setattr(client, "_send", too_slow)
+    with pytest.raises(cli.ApiError):
+        client.get("/x")
+    assert sent == [cli.REQUEST_TIMEOUT] * 5
+    sent.clear()
+    with pytest.raises(cli.ApiError) as raised:
+        client.post("/x", {}, timeout=cli.BUILD_LIMIT_SECONDS)
+    assert sent == [cli.BUILD_LIMIT_SECONDS] and raised.value.code == "timeout"
+
+
+def test_the_curl_fallback_waits_as_long_and_names_a_timeout(monkeypatch):
+    client = cli.Client("http://127.0.0.1:1", "s")
+    commands = []
+
+    def run(command, **kw):
+        commands.append(command)
+        return SimpleNamespace(returncode=28, stdout=b"", stderr=b"Operation timed out")
+
+    monkeypatch.setattr(cli.subprocess, "run", run)
+    with pytest.raises(cli.ApiError) as raised:
+        client._send_curl("POST", "/x", {}, 900)
+    assert commands[0][commands[0].index("--max-time") + 1] == "900"
+    assert (raised.value.status, raised.value.code) == (0, "timeout")
+
+
+def test_a_timeout_reads_as_slow_not_as_a_server_that_is_not_running():
+    assert cli.explain(cli.ApiError(0, "timeout", "timed out"), "127.0.0.1:8767") == (
+        "The local server did not answer in time. Try again in a minute.")
+    assert cli.explain(cli.ApiError(0, "timeout", "timed out"), "hosted.example") == (
+        "hosted.example did not answer in time. Try again in a minute.")

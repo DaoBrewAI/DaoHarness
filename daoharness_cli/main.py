@@ -26,6 +26,7 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import ssl
 import subprocess
 import sys
@@ -37,6 +38,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from getpass import getpass
 from pathlib import Path
@@ -49,7 +51,9 @@ COOKIE = "daobrew_web_session"
 HOME = Path(os.environ.get("DAOHARNESS_HOME") or Path.home() / ".daoharness")
 CONFIG = HOME / "config.json"
 POLL_SECONDS = 1.5
-BUILD_LIMIT_SECONDS = 15 * 60
+REQUEST_TIMEOUT = 60                # seconds an ordinary request may take
+BUILD_LIMIT_SECONDS = 15 * 60       # how long a build is waited for
+SLOW_AFTER_SECONDS = 20             # the waiting line then says that a local model can take a few minutes
 DECIDING = {"checklist_match", "screen_score", "classify_route"}
 SETTLED = {"complete", "rejected", "failed", "needs_attention", "needs_access", "needs_capability", "interrupted",
            "needs_revision", "needs_clarification"}
@@ -286,18 +290,21 @@ class Client:
     def get(self, path: str):
         return self.request("GET", path)
 
-    def post(self, path: str, body: dict):
-        return self.request("POST", path, body)
+    def post(self, path: str, body: dict, timeout: float | None = None):
+        return self.request("POST", path, body, timeout)
 
-    def request(self, method: str, path: str, body: dict | None = None):
+    def request(self, method: str, path: str, body: dict | None = None, timeout: float | None = None):
         """(status, payload). A dropped connection or a busy server is retried; writes are safe to repeat because
-        each carries its action id."""
+        each carries its action id. `timeout` is how long to wait for the answer (REQUEST_TIMEOUT); a call that
+        was asked to wait longer is not repeated when that runs out."""
+        timeout = REQUEST_TIMEOUT if timeout is None else timeout
         delay = 1.0
         for attempt in range(5):
             try:
-                return self._send(method, path, body)
+                return self._send(method, path, body, timeout)
             except ApiError as err:
-                if err.reported or err.status not in (0, 502, 503, 504) or attempt == 4:
+                waited_long = err.code == "timeout" and timeout > REQUEST_TIMEOUT
+                if err.reported or err.status not in (0, 502, 503, 504) or waited_long or attempt == 4:
                     raise
             self.pause(delay)
             delay = min(delay * 2, 8.0)
@@ -310,31 +317,35 @@ class Client:
             headers["Content-Type"] = "application/json"
         return headers
 
-    def _send(self, method: str, path: str, body):
+    def _send(self, method: str, path: str, body, timeout: float = REQUEST_TIMEOUT):
         if self.curl:
-            return self._send_curl(method, path, body)
+            return self._send_curl(method, path, body, timeout)
         data = None if body is None else json.dumps(body).encode("utf-8")
         request = urllib.request.Request(self.url + path, data=data, method=method, headers=self._headers(body))
         try:
-            with urllib.request.urlopen(request, timeout=60, context=self.context) as response:
+            with urllib.request.urlopen(request, timeout=timeout, context=self.context) as response:
                 return response.status, load(response.read())
         except urllib.error.HTTPError as exc:
             raise api_error(exc.code, load(exc.read())) from None
         except urllib.error.URLError as exc:
+            if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+                raise ApiError(0, "timeout", "timed out") from None
             if "CERTIFICATE_VERIFY_FAILED" in str(exc.reason) and shutil.which("curl"):
                 self.curl = True  # this Python has no certificates; curl uses the system's
-                return self._send_curl(method, path, body)
+                return self._send_curl(method, path, body, timeout)
             raise ApiError(0, "network", str(exc.reason)) from None
+        except (TimeoutError, socket.timeout):
+            raise ApiError(0, "timeout", "timed out") from None
         except OSError as exc:
             raise ApiError(0, "network", str(exc) or type(exc).__name__) from None
 
-    def _send_curl(self, method: str, path: str, body):
+    def _send_curl(self, method: str, path: str, body, timeout: float = REQUEST_TIMEOUT):
         fd, header_file = tempfile.mkstemp(prefix="daoharness-")  # 0600: the session stays out of the process list
         try:
             with os.fdopen(fd, "w") as handle:
                 for key, value in self._headers(body).items():
                     handle.write(f"{key}: {value}\n")
-            command = ["curl", "-sS", "-X", method, "--max-time", "60", "-H", f"@{header_file}",
+            command = ["curl", "-sS", "-X", method, "--max-time", str(max(1, int(timeout))), "-H", f"@{header_file}",
                        "-w", "\n%{http_code}", self.url + path]
             if body is not None:
                 command += ["--data-binary", "@-"]
@@ -342,6 +353,8 @@ class Client:
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         finally:
             os.unlink(header_file)
+        if done.returncode == 28:   # curl's "operation timed out"
+            raise ApiError(0, "timeout", "timed out")
         if done.returncode != 0:
             raise ApiError(0, "network", done.stderr.decode("utf-8", "replace").strip() or "curl failed")
         raw, _, code = done.stdout.rpartition(b"\n")
@@ -356,6 +369,8 @@ def is_local(url: str) -> bool:
 
 
 def explain(err: ApiError, host: str) -> str:
+    if err.status == 0 and err.code == "timeout":
+        return f"{'The local server' if is_local(host) else host} did not answer in time. Try again in a minute."
     if err.status == 0 and is_local(host):
         return "The local server is not running. Start it in another terminal: daoharness serve"
     if err.status == 0:
@@ -497,6 +512,42 @@ def settle(ui: UI, client: Client, status: int, payload, label: str):
             return state.get("result")
         if time.monotonic() - started > BUILD_LIMIT_SECONDS:
             raise Stop("This is taking longer than expected. Check again in a minute; asking again never builds it twice.")
+
+
+def waiting_text(label: str, elapsed: float) -> str:
+    """The waiting line: what is going on and for how long. A local model can take minutes, so it says so."""
+    line = f"{label} · {clock(elapsed)}"
+    return f"{line} · a local model can take a few minutes" if elapsed >= SLOW_AFTER_SECONDS else line
+
+
+@contextmanager
+def waiting(ui: UI, label: str):
+    """A line that counts the seconds while a call that answers only when it is done stays open."""
+    started = time.monotonic()
+    if ui.live.tty:
+        ui.live.set(lambda: waiting_text(label, time.monotonic() - started))
+    else:
+        ui.p(f"{label}…")
+    try:
+        yield
+    finally:
+        ui.live.clear()
+
+
+def start_build(ui: UI, client: Client, path: str, body: dict, label: str):
+    """POST a build. Hosted answers 202 at once and settle() polls. The local server builds before it answers, so
+    that call waits, up to BUILD_LIMIT_SECONDS, behind a line that counts the seconds."""
+    if not is_local(client.url):
+        return client.post(path, body)
+    with waiting(ui, label):
+        try:
+            return client.post(path, body, timeout=BUILD_LIMIT_SECONDS)
+        except ApiError as err:
+            if err.code != "timeout":
+                raise
+    raise Stop(f"The model is still working after {BUILD_LIMIT_SECONDS // 60} minutes, so the terminal stopped "
+               "waiting. The local server keeps going: look for the workflow in a few minutes with daoharness ls, "
+               "before you ask again. If this keeps happening, use a faster model.")
 
 
 def item_noun(steps: list):
@@ -666,8 +717,8 @@ def cmd_new(ui: UI, client: Client, args: argparse.Namespace) -> None:
         raise Stop('Describe the job: daoharness new "Every Monday, …"')
     ui.p()
     started = time.monotonic()
-    status, payload = client.post(f"{API}/creations", {"action_id": new_action("create"), "need": need,
-                                                       "source": "workflows"})
+    status, payload = start_build(ui, client, f"{API}/creations", {
+        "action_id": new_action("create"), "need": need, "source": "workflows"}, "Building the workflow")
     creation = settle(ui, client, status, payload, "Building the workflow")
     while (creation or {}).get("status") == "needs_clarification":
         if ui.yes or not ui.interactive:

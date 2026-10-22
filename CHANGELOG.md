@@ -7,6 +7,7 @@
 - Model replies with `<think>` blocks, code fences, trailing commas or capitalised step ids are tidied and recorded.
 - Decisions: a choice in another case or a confidence like `"92%"` is read; an unreadable answer goes to a person alone.
 - Errors say what went wrong and what to do, not "model unavailable".
+- A local build shows a waiting line with the elapsed seconds and is waited for up to 15 minutes, not 60 seconds.
 
 ## 0.1.0 · 2026-10-22
 
