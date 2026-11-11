@@ -7,6 +7,8 @@
 
 <h3 align="center">One sentence in. A workflow your people sign off.</h3>
 
+<p align="center">DaoHarness Skeleton is the open-source core of <a href="https://daobrew.ai">DaoHarness</a>, the AI-native service infra for expert-owned firms: agents do the casework, the expert signs every call, and every step is on the record.</p>
+
 <p align="center">
   <a href="https://github.com/DaoBrewAI/DaoHarness/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/DaoBrewAI/DaoHarness/actions/workflows/tests.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-4B4BE8?style=flat-square"></a>
